@@ -32,7 +32,7 @@ python -m uvicorn notana_planner.api:app --port 8000    # open http://localhost:
 4. Set the **clock** (e.g. 10:14), apply an **incident** and read the **Re-planning report** (before/after, phases used, every changed visit).
 5. **Experiments** tab: run strategies A–D on the same scenario and incidents.
 
-Headless: `python demo.py --sick 2 --clock 10:14` · Tests: `python -m pytest` (≈75 s).
+Headless: `python demo.py --sick 2 --clock 10:14` · Tests: `python -m pytest` (35 tests, ≈2 min).
 
 Optional environment (see `.env.example`, never commit keys):
 
@@ -166,6 +166,25 @@ time-window deviation, continuity, changed assignments and start times, runtime 
 It says *"no measurable difference"* when that is the case, labels C as the deterministic fallback when no
 API key is set, and notes that a single seed is indicative rather than statistically established.
 
+### Measured result (default scenario, seed 42, no API key)
+
+Baseline day plan: **568 / 587 visits planned, 19 unplanned (each explained), VALID**.
+Incident chain: 2 employees sick at 10:14 → Södermalm traffic ×1.6 at 10:34 → a 25-min delay at
+10:44 → a medication moved at 10:54.
+
+| Strategy | Unplanned at end | Lost vs base plan | Hard violations | Travel (min) | Changed assignments | Changed start times | Re-plan runtime |
+|---|---|---|---|---|---|---|---|
+| A. Baseline optimizer | 28 | 10 | 0 | 7,817 | 62 | 126 | 78 s |
+| B. + enhanced repair | 22 | 6 | 0 | 7,971 | 76 | 164 | 65 s |
+| C. + advisor (deterministic fallback) | 22 | 6 | 0 | 7,971 | 76 | 164 | 61 s |
+| D. + mock classifier ranking | 23 | 7 | 0 | 7,959 | 69 | 150 | 99 s |
+
+Reading it honestly: the deterministic **ejection-chain repair (B)** keeps about 6 more visits planned
+than A, at the cost of more travel and more reassignments. **C** is identical to B here, because without
+an API key the deterministic advisor only switched on the same repair. **D**'s mock classifier explores
+every phase (slower) and lands between A and B. This is one seed, so nothing here shows that an AI
+component helps. The mode exists to measure exactly that once a real LLM/JEV component is attached.
+
 ---
 
 ## Calibration notes (honest)
@@ -175,7 +194,7 @@ API key is set, and notes that a single seed is indicative rather than statistic
   realistic Swedish home-care shift templates (early, day, late, *delad tur* split shifts,
   part-time) with meal breaks between demand peaks.
 * With the defaults (seed 42, pressure 0.3), the day plan leaves about **3 % of visits unplanned**
-  (≈ 18–21 of 587), each with a structured reason. Raise *staffing pressure* or remove employees to
+  (≈ 18–21 of 587; 19 in the run above), each with a structured reason. Raise *staffing pressure* or remove employees to
   see real capacity problems, or add *extra pool staff* to see them resolved. The engine never shortens
   care and never hides a shortage.
 * Unplanned diagnostics are evaluated **without moving other visits**. *"No opening"* means none
