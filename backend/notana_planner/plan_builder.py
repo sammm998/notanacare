@@ -38,15 +38,32 @@ def assemble_plan(
 
     for eid, emp in scenario.employees.items():
         if eid in keep_routes and previous is not None and eid in previous.routes:
+            # Untouched route: same visits, same times. Started stops are locked;
+            # travel data of future legs is refreshed to the current conditions
+            # (feasibility is then checked by the validator, never assumed).
             old = previous.routes[eid]
+            stops = []
+            loc = old.start_location_id or emp.start_location_id
+            for s0 in old.stops:
+                started = clock is not None and s0.start <= clock
+                st = _copy_stop(s0, locked=True if started else None)
+                if not st.locked:
+                    st.travel_from_prev = travel.minutes(loc, st.location_id)
+                    st.prev_location_id = loc
+                stops.append(st)
+                loc = st.location_id
+            route_end = old.route_end
+            to_end = travel.minutes(loc, old.end_location_id or emp.end_location_id)
+            if stops and route_end is not None:
+                route_end = max(route_end, stops[-1].end + to_end)
             routes[eid] = Route(
                 employee_id=eid,
-                stops=[_copy_stop(s) for s in old.stops],
+                stops=stops,
                 route_start=old.route_start,
-                route_end=old.route_end,
+                route_end=route_end,
                 start_location_id=old.start_location_id,
                 end_location_id=old.end_location_id,
-                travel_to_end=old.travel_to_end,
+                travel_to_end=to_end,
             )
             continue
         prefix = [_copy_stop(s, locked=True) for s in frozen.get(eid, [])]

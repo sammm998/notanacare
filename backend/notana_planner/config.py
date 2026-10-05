@@ -28,6 +28,7 @@ class ObjectiveWeights:
     employee_change: int = 900  # per visit-slot moved to another employee
     time_change_minute: int = 12  # per minute away from previously communicated start
     unaffected_route_touch: int = 300  # extra per visit moved off an unaffected route
+    drop_communicated_visit: int = 150_000  # extra drop penalty for a visit already in the plan
 
     def to_dict(self) -> dict:
         return asdict(self)

@@ -141,8 +141,12 @@ def validate_plan(
     for vid in seen_in_routes:
         if vid not in plan.assignments:
             err("ROUTE_WITHOUT_ASSIGNMENT", f"{vid} appears in a route but has no assignment", visit_id=vid)
-    for vid in visits:
+    for vid, v in visits.items():
         tick("completeness")
+        if v.status.value == "cancelled":
+            if vid in plan.assignments and vid not in locked_ids:
+                err("CANCELLED_VISIT_PLANNED", f"{vid} is cancelled but still planned", visit_id=vid)
+            continue
         if vid not in plan.assignments and vid not in plan.unplanned:
             err("VISIT_MISSING", f"{vid} is neither planned nor reported unplanned", visit_id=vid)
 
@@ -188,7 +192,8 @@ def validate_plan(
             # Travel feasibility (historic legs into locked stops are not re-checked:
             # they were driven under the conditions of that time).
             t = travel.minutes(prev_loc, st.location_id)
-            if not st.locked:
+            historic = st.locked or (clock is not None and st.start <= clock)
+            if not historic:
                 ready = prev_end
                 if emp.available_from is not None:
                     ready = max(ready, emp.available_from)
@@ -219,7 +224,7 @@ def validate_plan(
                         visit_id=st.visit_id,
                     )
             elif prev_end > st.start:
-                err("OVERLAP", f"{eid}: locked stops overlap at {_hhmm(st.start)}", employee_id=eid)
+                err("OVERLAP", f"{eid}: started stops overlap at {_hhmm(st.start)}", employee_id=eid)
             prev_loc, prev_end, prev_kind = st.location_id, st.end, st.visit_id or st.kind
 
             if st.kind == "visit" and st.visit_id in visits:

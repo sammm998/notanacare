@@ -160,17 +160,22 @@ class RoutingSolver:
         _dbg("breaks", t0)
         vidx = p.vehicle_index()
 
-        # Continuity / stability: per-vehicle unary penalties summed via span cost.
+        # Continuity / stability: per-vehicle penalties of serving a node, summed
+        # via the span cost of a vehicle-dependent dimension. Registered as
+        # *binary* callbacks: the unary-vector variant of vehicle-dependent
+        # transits makes valid models infeasible in some OR-Tools builds.
         pen_cbs = []
         max_pen = 1
         for vi, v in enumerate(p.vehicles):
             vec = [0] * N
             for n in range(2 * V, N):
                 t = node_task[n]
-                if t is not None:
+                if t is not None and not t.pinned:  # pinned: vehicle fixed, cost constant
                     vec[n] = assignment_penalty(p, t, v.employee_id)
             max_pen = max(max_pen, sum(vec))
-            pen_cbs.append(routing.RegisterUnaryTransitVector(vec))
+            pen_cbs.append(
+                routing.RegisterTransitCallback(lambda i, j, vec=vec: vec[manager.IndexToNode(i)])
+            )
         routing.AddDimensionWithVehicleTransits(pen_cbs, 0, max_pen + 1, True, "Assign")
         routing.GetDimensionOrDie("Assign").SetSpanCostCoefficientForAllVehicles(1)
 
@@ -213,7 +218,10 @@ class RoutingSolver:
                     tdim.SetCumulVarSoftUpperBound(idx, target, coef)
                     tdim.SetCumulVarSoftLowerBound(idx, target, coef)
                 routing.AddDisjunction([idx], t.penalty)
-            if t.roles == 2:
+            fully_pinned = bool(t.pinned) and len(t.pinned) == t.roles
+            if t.roles == 2 and not fully_pinned:
+                # Pinned pairs already have fixed, distinct vehicles and equal fixed
+                # starts; cross-route constraints on them only hinder insertion.
                 a, b = (manager.NodeToIndex(n) for n in nodes)
                 ca, cb = tdim.CumulVar(a), tdim.CumulVar(b)
                 solver.Add(routing.ActiveVar(a) == routing.ActiveVar(b))
