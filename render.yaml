@@ -1,0 +1,12 @@
+# Render Blueprint: dashboard -> New -> Blueprint -> pick this repo.
+services:
+  - type: web
+    name: notana-care-planner
+    runtime: docker
+    plan: standard        # the solver needs real CPU; free/starter work but are slow
+    healthCheckPath: /api/health
+    envVars:
+      - key: GOOGLE_MAPS_API_KEY
+        sync: false       # optional, set in the dashboard
+      - key: ANTHROPIC_API_KEY
+        sync: false       # optional, set in the dashboard

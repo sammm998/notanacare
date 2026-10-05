@@ -41,6 +41,18 @@ Optional environment (see `.env.example`, never commit keys):
 | `GOOGLE_MAPS_API_KEY` | Google **Routes API** `computeRouteMatrix` travel times (traffic-aware, cached to disk). Without it: synthetic travel. |
 | `ANTHROPIC_API_KEY` | Claude planning advisor for strategy C (`claude-opus-5-5`, override with `NOTANA_CLAUDE_MODEL`). Without it: deterministic advisor. |
 
+### Deploy
+
+The repo ships a `Dockerfile` (single process on purpose: live sessions live in memory), plus
+`render.yaml` and `fly.toml`.
+
+* **Render**: Dashboard → *New* → *Blueprint* → select this repo. Optionally set `GOOGLE_MAPS_API_KEY` / `ANTHROPIC_API_KEY`.
+* **Fly.io** (Stockholm region): `fly launch --copy-config --no-deploy && fly deploy`.
+* **Anywhere with Docker**: `docker build -t notana-planner . && docker run -p 8000:8000 notana-planner`.
+
+Give it real CPU (≥ 2 vCPU, 2–4 GB RAM). A full day takes about 25 s to optimise; on free tiers it works but is slow.
+There is no login, so put it behind your own access control before sharing beyond a demo audience.
+
 ---
 
 ## Architecture
