@@ -219,6 +219,8 @@ def build_repair_problem(
         )
         if any(e in effect.affected_employees for e in emps) and all(e in in_problem for e in emps):
             free = True
+        if v.locked and all(e in vehicle_ids for e in emps):
+            free = False  # user-locked: same employees, same time
         if free and all(e in in_problem or e not in vehicle_ids for e in emps):
             add_task(vid)
         else:
@@ -295,6 +297,8 @@ def replan(
     effect: IncidentEffect,
     params: RepairParams | None = None,
     strategy: str = "baseline",
+    exhaustive: bool = False,
+    chooser: Any = None,
 ) -> ReplanResult:
     from .explain import plan_diff, replan_summary
 
@@ -365,8 +369,13 @@ def replan(
             best = pr
         if accepted:
             tried_unplanned_ok = True
-            best = pr
-            break
+            if not exhaustive:
+                best = pr
+                break
+    if chooser is not None:
+        picked = chooser(phases, plan)
+        if picked is not None:
+            best = picked
     if best is None:
         best = phases[-1]
     chosen = best.plan
@@ -410,3 +419,87 @@ def clone_world(world: World) -> World:
         weights=copy.deepcopy(world.weights),
         settings=copy.deepcopy(world.settings),
     )
+
+
+def incident_context(world: World, plan: Plan, effect: IncidentEffect) -> dict[str, Any]:
+    vis = world.scenario.visits
+    rel = [v for v in effect.released_visits if v in vis]
+    return {
+        "incident_kind": effect.kind,
+        "description": effect.description,
+        "clock": fmt_time(effect.clock),
+        "released_visits": len(rel),
+        "released_high_priority": sum(1 for v in rel if vis[v].priority >= 5),
+        "released_double_staffed": sum(1 for v in rel if vis[v].required_employee_count == 2),
+        "affected_employees": len(effect.affected_employees),
+        "zones": sorted(effect.zones),
+        "unplanned_before": plan.score.get("unplanned_visits"),
+        "utilization": plan.score.get("utilization"),
+        "employees_working": plan.score.get("employees_working"),
+        "facts": effect.facts,
+    }
+
+
+def replan_with_strategy(
+    world: World,
+    plan: Plan,
+    effect: IncidentEffect,
+    strategy: str = "baseline",
+    advisor: Any = None,
+    classifier: Any = None,
+) -> tuple[ReplanResult, dict[str, Any]]:
+    """Run one re-planning strategy. Returns (result, strategy metadata)."""
+    meta: dict[str, Any] = {"strategy": strategy}
+    params = RepairParams()
+    if strategy == "enhanced":
+        params.enhanced_repair = True
+    if strategy == "advisor":
+        from .advisor import make_advisor
+
+        advisor = advisor or make_advisor()
+        decision = advisor.suggest_repair_strategy(incident_context(world, plan, effect))
+        for k, v in decision.params.items():
+            setattr(params, k, v)
+        params.source = decision.source
+        meta["advisor"] = decision.to_dict()
+    if strategy == "classifier":
+        from .classifier import Alternative, make_classifier
+
+        classifier = classifier or make_classifier()
+        params.enhanced_repair = True
+        ctx = incident_context(world, plan, effect)
+        meta["classification"] = classifier.classify_incident(ctx)
+
+        def chooser(phases: list[PhaseResult], before: Plan) -> PhaseResult | None:
+            alts = []
+            for ph in phases:
+                sc = ph.plan.score
+                stab = sc.get("stability", {})
+                alts.append(
+                    Alternative(
+                        key=str(ph.phase),
+                        valid=bool(ph.plan.validation.get("valid")),
+                        features={
+                            "lost_high_priority": sum(1 for v in ph.lost if world.scenario.visits[v].priority >= 5),
+                            "lost": len(ph.lost),
+                            "unplanned": sc.get("unplanned_visits", 0),
+                            "visits_changed": stab.get("visits_changed", 0),
+                            "employee_changes": stab.get("employee_changes", 0),
+                            "time_change_minutes": stab.get("start_time_change_minutes", 0),
+                            "travel_minutes": sc.get("travel_minutes", 0),
+                            "routes_changed": stab.get("routes_changed", 0),
+                        },
+                    )
+                )
+            ranking = classifier.rank_alternatives(alts)
+            meta["ranking"] = ranking
+            if not ranking:
+                return None
+            return next(p for p in phases if str(p.phase) == ranking[0][0])
+
+        res = replan(world, plan, effect, params, strategy, exhaustive=True, chooser=chooser)
+    else:
+        res = replan(world, plan, effect, params, strategy)
+    meta["params"] = params.to_dict()
+    res.plan.solver_stats["strategy_meta"] = meta
+    return res, meta

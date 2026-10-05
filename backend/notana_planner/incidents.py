@@ -131,6 +131,9 @@ def _sick(world: World, plan: Plan, inc: Incident) -> IncidentEffect:
                         busy_until = max(busy_until, s.end)
             emp.unavailable.append(Interval(busy_until, max(busy_until, emp.shift_end), "sick"))
         released |= set(_future_visits_of(plan, eid, clock))
+    unlocked = sorted(v for v in released if world.scenario.visits[v].locked)
+    for v in unlocked:
+        world.scenario.visits[v].locked = False  # cannot be kept: its employee is gone
     affected = set(ids) | _partners(plan, released)
     return IncidentEffect(
         kind=inc.kind,
@@ -138,7 +141,7 @@ def _sick(world: World, plan: Plan, inc: Incident) -> IncidentEffect:
         description=f"Employee{'s' if len(ids) > 1 else ''} {', '.join(names)} reported sick at {fmt_time(clock)}.",
         affected_employees=affected,
         released_visits=released,
-        facts={"sick_employees": ids, "future_visits_affected": len(released)},
+        facts={"sick_employees": ids, "future_visits_affected": len(released), "unlocked_visits": unlocked},
     )
 
 
