@@ -191,7 +191,9 @@ def validate_plan(
                     )
             # Travel feasibility (historic legs into locked stops are not re-checked:
             # they were driven under the conditions of that time).
-            t = travel.minutes(prev_loc, st.location_id)
+            # An unavailability gap (split shift, appointment) starts wherever the
+            # employee is; work resumes from the gap's location (the team office).
+            t = 0 if st.kind == "unavailable" else travel.minutes(prev_loc, st.location_id)
             historic = st.locked or (clock is not None and st.start <= clock)
             if not historic:
                 ready = prev_end

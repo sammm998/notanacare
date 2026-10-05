@@ -105,6 +105,12 @@ def _employee_state(world: World, plan: Plan, eid: str, prefix: list[RouteStop],
         location=loc,
         taken_break_ids=set(range(n_taken)),
     )
+    if v is not None:
+        # A meal break must stay reachable: leave at least the travel time to the office.
+        reach = v.start_time + world.travel().minutes(v.start_location, v.break_location or v.start_location)
+        for b in v.breaks:
+            if b.kind == "break" and b.latest_start < reach:
+                b.latest_start = reach
     return v
 
 
@@ -377,7 +383,10 @@ def replan(
         if picked is not None:
             best = picked
     if best is None:
+        # No phase produced a valid plan. Keep the least-bad one but make it loud:
+        # the plan is marked INVALID by the validator and the summary says so.
         best = phases[-1]
+        best.reason = "NO PHASE PRODUCED A VALID PLAN - manual review required"
     chosen = best.plan
     diff = plan_diff(world.scenario, plan, chosen, clock)
     summary, facts = replan_summary(world, plan, chosen, effect, diff, best, phases)

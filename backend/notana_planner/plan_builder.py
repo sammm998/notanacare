@@ -48,7 +48,7 @@ def assemble_plan(
                 started = clock is not None and s0.start <= clock
                 st = _copy_stop(s0, locked=True if started else None)
                 if not st.locked:
-                    st.travel_from_prev = travel.minutes(loc, st.location_id)
+                    st.travel_from_prev = 0 if st.kind == "unavailable" else travel.minutes(loc, st.location_id)
                     st.prev_location_id = loc
                 stops.append(st)
                 loc = st.location_id
@@ -89,7 +89,7 @@ def assemble_plan(
                         location_id=s.location,
                         start=s.start,
                         end=s.start + s.duration,
-                        travel_from_prev=travel.minutes(loc, s.location),
+                        travel_from_prev=0 if kind == "unavailable" else travel.minutes(loc, s.location),
                         prev_location_id=loc,
                     )
                 )
@@ -125,6 +125,18 @@ def assemble_plan(
             starts={e: s.start for _, e, s in occ},
         )
 
+    # A double-staffed visit that lost one of its employees (e.g. a pinned role
+    # the solver had to drop) is released as a whole - never left half-staffed.
+    for vid, a in list(assignments.items()):
+        v = scenario.visits.get(vid)
+        started = clock is not None and a.start <= clock
+        if v is not None and len(a.employee_ids) < v.required_employee_count and not started:
+            for eid in a.employee_ids:
+                routes[eid].stops = [s for s in routes[eid].stops if s.visit_id != vid]
+                _refresh_travel(routes[eid], travel, scenario.employees[eid].start_location_id, clock)
+            del assignments[vid]
+            output.stats.setdefault("released_incomplete_doubles", []).append(vid)
+
     unplanned = {
         vid: UnplannedVisit(vid, [])
         for vid, v in scenario.visits.items()
@@ -148,6 +160,18 @@ def assemble_plan(
         travel_source=travel.source,
         parent_plan_id=previous.id if previous else None,
     )
+
+
+def _refresh_travel(route: Route, travel: TravelMatrix, default_start: str, clock: int | None) -> None:
+    """Recompute recorded travel of future legs after a stop was removed."""
+    loc = route.start_location_id or default_start
+    for st in sorted(route.stops, key=lambda s: s.start):
+        if not st.locked and not (clock is not None and st.start <= clock):
+            st.travel_from_prev = 0 if st.kind == "unavailable" else travel.minutes(loc, st.location_id)
+            st.prev_location_id = loc
+        loc = st.location_id
+    if route.stops and route.route_end is not None:
+        route.travel_to_end = travel.minutes(loc, route.end_location_id or default_start)
 
 
 def _copy_stop(s: RouteStop, locked: bool | None = None) -> RouteStop:

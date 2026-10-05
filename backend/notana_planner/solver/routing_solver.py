@@ -109,6 +109,7 @@ class RoutingSolver:
                 break_nodes[(vi, k)] = n
                 node_break[n] = (vi, k)
         N = len(node_task)
+        free_in = {n for (vi, k), n in break_nodes.items() if p.vehicles[vi].breaks[k].kind == "unavailable"}
 
         if not tasks:
             return RoutingResult({v.employee_id: [] for v in p.vehicles}, pre_dropped, "EMPTY", 0, 0.0, False)
@@ -130,7 +131,7 @@ class RoutingSolver:
                 time_m.append([0] * N)
                 cost_m.append([0] * N)
                 continue
-            trow = [ri[li[j]] for j in range(N)]
+            trow = [0 if j in free_in else ri[li[j]] for j in range(N)]
             time_m.append([svc + x for x in trow])
             cost_m.append([w.travel_minute * trow[j] + int(w.travel_km * kri[li[j]]) for j in range(N)])
         _dbg("matrices built", t0)

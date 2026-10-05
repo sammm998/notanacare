@@ -34,6 +34,7 @@ class TTStop:
     earliest: int
     latest: int
     fixed: int | None = None
+    free_arrival: bool = False
 
 
 @dataclass(slots=True)
@@ -86,7 +87,7 @@ def timetable(
             else:
                 x = m.NewIntVar(st.earliest, st.latest, f"s_{eid}_{k}")
             vs.append(x)
-            m.Add(x >= prev_end + tm.minutes(prev_loc, st.location))
+            m.Add(x >= prev_end + (0 if st.free_arrival else tm.minutes(prev_loc, st.location)))
             prev_end = x + st.duration
             prev_loc = st.location
             if st.kind == "visit" and st.visit_id is not None:

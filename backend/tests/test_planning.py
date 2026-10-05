@@ -110,3 +110,25 @@ def test_strategies_run_and_report(small_world, small_plan):
             assert meta["advisor"]["source"].startswith(("deterministic", "claude"))
         if strat == "classifier":
             assert meta["classification"]["urgency"] in ("low", "medium", "high")
+
+
+def test_incident_chain_regression_stays_valid():
+    """Sick -> traffic -> delay -> medication moved (the experiment sequence) on the
+    scenario that exposed break / split-shift / half-staffed-double bugs: every
+    repair phase must validate."""
+    from notana_planner.domain import ScenarioConfig
+    from notana_planner.experiments import default_incidents
+    from notana_planner.generator import generate_scenario
+    from notana_planner.planner import World, plan_day
+
+    sc = generate_scenario(ScenarioConfig(seed=42, target_interventions=1200, employee_count=26))
+    w0 = World.create(sc)
+    base = plan_day(w0, "baseline", 6)
+    w = clone_world(w0)
+    plan = base
+    for inc in default_incidents(base, sc):
+        eff = apply_incident(w, plan, inc)
+        res = replan(w, plan, eff)
+        for ph in res.phases:
+            assert ph.plan.validation["valid"], (inc.kind, ph.phase, ph.plan.validation["errors"][:3])
+        plan = res.plan

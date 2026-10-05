@@ -27,7 +27,11 @@ def vehicle_for(
         if taken_break_ids and k in taken_break_ids:
             continue
         earliest = max(b.earliest_start, start)
-        latest = max(b.latest_start, earliest)
+        latest = b.latest_start
+        if earliest > b.earliest_start:
+            # Availability (delay, ongoing visit, re-plan clock) squeezed the window:
+            # leave time to reach the office. The validator reports the shift.
+            latest = max(latest, earliest + 45)
         breaks.append(BreakRule(b.duration_minutes, earliest, latest, b.kind))
     for iv in sorted(emp.unavailable, key=lambda i: i.start):
         if iv.end <= start:

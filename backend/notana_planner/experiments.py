@@ -160,6 +160,8 @@ def _conclusion(results: list[dict]) -> list[str]:
         return ["No baseline run to compare against."]
     b = base["metrics"]
     out = []
+    if not b["valid"]:
+        out.append(f"{base['label']}: final plan INVALID ({b['hard_violations']} hard violations) - see per-incident detail.")
     for r in ran:
         if r is base:
             continue

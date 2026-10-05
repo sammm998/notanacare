@@ -31,6 +31,7 @@ class Stop:
     duration: int
     earliest: int
     latest: int
+    free_arrival: bool = False  # unavailability gap: stops wherever the employee is (no travel in)
 
 
 @dataclass(slots=True)
@@ -47,7 +48,7 @@ def _travel_chain(stops: list[Stop], v: VehicleSpec, tm: TravelMatrix) -> tuple[
     into: list[int] = []
     cur = v.start_location
     for s in stops:
-        into.append(tm.minutes(cur, s.location))
+        into.append(0 if s.free_arrival else tm.minutes(cur, s.location))
         cur = s.location
     return into, tm.minutes(cur, v.end_location)
 

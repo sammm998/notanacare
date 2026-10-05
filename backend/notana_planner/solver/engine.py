@@ -39,6 +39,7 @@ class SolvedStop:
     location: str
     duration: int
     start: int
+    free_arrival: bool = False
 
 
 @dataclass(slots=True)
@@ -208,6 +209,11 @@ class SolveEngine:
             ctor.run(rest)
             placed = {k: dict(v.roles) for k, v in ctor.placements.items()}
 
+        # Breaks / unavailable gaps are hard: if routing dropped one (it only does so
+        # when it cannot fit), put it back and release visits until the route is feasible.
+        released = _ensure_breaks(p, work, tasks, placed)
+        if released:
+            stats["break_guard"] = {"released_visits": sorted(released)}
         unplanned = {vid for vid in tasks if vid not in placed or len(placed[vid]) < tasks[vid].roles}
         repair = Constructor(p, work)
         for vid, roles in placed.items():
@@ -231,7 +237,8 @@ class SolveEngine:
             tts = []
             for st in r.stops:
                 if st.kind == "break":
-                    tts.append(TTStop("break", None, st.role, st.location, st.duration, st.earliest, st.latest))
+                    tts.append(TTStop("break", None, st.role, st.location, st.duration, st.earliest, st.latest,
+                                      free_arrival=st.free_arrival))
                     continue
                 t = tasks[st.visit_id]  # type: ignore[index]
                 fixed = t.pinned[st.role][1] if t.pinned and st.role in t.pinned else None
@@ -244,7 +251,7 @@ class SolveEngine:
         if tt is not None and tt.ok:
             for eid, route in tt_routes.items():
                 out_routes[eid] = [
-                    SolvedStop(s.kind, s.visit_id, s.role, s.location, s.duration, start)
+                    SolvedStop(s.kind, s.visit_id, s.role, s.location, s.duration, start, s.free_arrival)
                     for s, start in zip(route.stops, tt.starts[eid])
                 ]
                 r_start[eid] = tt.route_start[eid]
@@ -262,7 +269,7 @@ class SolveEngine:
             for eid, r in repair.routes.items():
                 starts = forward(r.stops, r.vehicle, p.travel) or [s.earliest for s in r.stops]
                 out_routes[eid] = [
-                    SolvedStop(s.kind, s.visit_id, s.role, s.location, s.duration, st)
+                    SolvedStop(s.kind, s.visit_id, s.role, s.location, s.duration, st, s.free_arrival)
                     for s, st in zip(r.stops, starts)
                 ]
                 r_start[eid] = r.vehicle.start_time
@@ -280,6 +287,43 @@ class SolveEngine:
         return SolveOutput(out_routes, r_start, r_end, unplanned, stats)
 
 
+def _ensure_breaks(
+    p: PlanningProblem,
+    work: dict[str, WorkRoute],
+    tasks: dict[str, Task],
+    placed: dict[str, dict[int, tuple[str, int]]],
+) -> set[str]:
+    from .routes import insertion_options
+
+    released: set[str] = set()
+    templates = initial_routes(p)
+    for eid, r in work.items():
+        have = {s.role for s in r.stops if s.kind == "break"}
+        for brk in templates[eid].stops:
+            if brk.role in have:
+                continue
+            while True:
+                opts = insertion_options(r, brk, p.travel)
+                if opts:
+                    best = min(opts, key=lambda o: o.delta_travel)
+                    r.stops.insert(best.position, brk)
+                    break
+                # Release the free visit closest to the break window.
+                cands = [
+                    s for s in r.stops
+                    if s.kind == "visit" and not (tasks[s.visit_id].pinned)  # type: ignore[index]
+                ]
+                if not cands:
+                    break
+                victim = min(cands, key=lambda s: abs(s.earliest - brk.earliest))
+                vid = victim.visit_id
+                for e2, rr in work.items():
+                    rr.stops = [s for s in rr.stops if s.visit_id != vid]
+                placed.pop(vid, None)  # type: ignore[arg-type]
+                released.add(vid)  # type: ignore[arg-type]
+    return released
+
+
 def _free_intervals(
     p: PlanningProblem, task: Task, eid: str, stops: list[SolvedStop], r_start: int | None, r_end: int | None
 ) -> list[tuple[int, int, int]]:
@@ -295,7 +339,8 @@ def _free_intervals(
         else:
             nxt_loc, nxt_start = nxt.location, nxt.start
         lo = max(task.earliest, prev_end + tm.minutes(prev_loc, task.location_id))
-        hi = min(task.latest, nxt_start - task.duration - tm.minutes(task.location_id, nxt_loc))
+        to_next = 0 if (nxt is not None and nxt.free_arrival) else tm.minutes(task.location_id, nxt_loc)
+        hi = min(task.latest, nxt_start - task.duration - to_next)
         if lo <= hi:
             out.append((lo, hi, pos))
         if nxt is not None:

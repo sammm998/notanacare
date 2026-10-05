@@ -28,7 +28,8 @@ def initial_routes(problem: PlanningProblem) -> dict[str, WorkRoute]:
     routes: dict[str, WorkRoute] = {}
     for v in problem.vehicles:
         stops = [
-            Stop("break", None, k, v.break_location, b.duration_minutes, b.earliest_start, b.latest_start)
+            Stop("break", None, k, v.break_location, b.duration_minutes, b.earliest_start, b.latest_start,
+                 free_arrival=b.kind == "unavailable")
             for k, b in enumerate(v.breaks)
         ]
         routes[v.employee_id] = WorkRoute(v, stops)
