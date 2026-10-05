@@ -1,0 +1,43 @@
+"""Soft-cost terms shared by construction, routing and timetabling."""
+
+from __future__ import annotations
+
+from .problem import PlanningProblem, Task
+
+
+def assignment_penalty(problem: PlanningProblem, task: Task, employee_id: str) -> int:
+    """Cost of letting ``employee_id`` serve one role of ``task``.
+
+    Continuity (does the employee know the recipient / are they preferred)
+    plus re-planning stability (was the visit previously with someone else).
+    """
+    w = problem.weights
+    r = problem.scenario.recipients[task.recipient_id]
+    cw = r.continuity_weight
+    pen = 0.0
+    if employee_id not in r.known_employee_ids:
+        pen += w.continuity_unknown_employee * cw
+    if r.preferred_employee_ids and employee_id not in r.preferred_employee_ids:
+        pen += w.continuity_preferred_bonus * cw
+    if task.previous_employees and employee_id not in task.previous_employees:
+        pen += w.employee_change
+        if any(e in problem.unaffected_employees for e in task.previous_employees):
+            pen += w.unaffected_route_touch
+    return int(pen)
+
+
+def time_target(task: Task) -> int:
+    """Reference start: previously communicated time if any, else preferred."""
+    return task.previous_start if task.previous_start is not None else task.preferred
+
+
+def time_deviation_cost(problem: PlanningProblem, task: Task, start: int) -> int:
+    w = problem.weights
+    cost = w.preferred_time_minute * abs(start - task.preferred)
+    if task.previous_start is not None:
+        cost += w.time_change_minute * abs(start - task.previous_start)
+    return cost
+
+
+def clamp(x: int, lo: int, hi: int) -> int:
+    return lo if x < lo else hi if x > hi else x
