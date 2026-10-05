@@ -128,16 +128,18 @@ class GoogleRoutesTravelTimeProvider(TravelTimeProvider):
 
     @staticmethod
     def _departure_time(departure_minute: int) -> str:
-        # Routes API requires a future departure time for traffic-aware routing:
-        # use the next occurrence of the given local time-of-day (Europe/Stockholm ~ UTC+1/+2).
-        now = dt.datetime.now(dt.timezone.utc)
-        local_offset = dt.timedelta(hours=2)
-        day = (now + local_offset).date()
-        target = dt.datetime.combine(day, dt.time(departure_minute // 60, departure_minute % 60))
-        target = target.replace(tzinfo=dt.timezone.utc) - local_offset
+        """Next future occurrence of the local (Europe/Stockholm) time of day, as RFC 3339 UTC.
+
+        Traffic-aware routing requires a departure time in the future.
+        """
+        from zoneinfo import ZoneInfo
+
+        tz = ZoneInfo(os.environ.get("NOTANA_TIMEZONE", "Europe/Stockholm"))
+        now = dt.datetime.now(tz)
+        target = now.replace(hour=departure_minute // 60, minute=departure_minute % 60, second=0, microsecond=0)
         if target <= now + dt.timedelta(minutes=5):
             target += dt.timedelta(days=1)
-        return target.strftime("%Y-%m-%dT%H:%M:%SZ")
+        return target.astimezone(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     def _request(self, origins: list[Location], dests: list[Location], departure: str) -> list[dict]:
         def wp(loc: Location) -> dict:
