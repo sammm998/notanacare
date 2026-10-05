@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Notana Care · Planning Simulator</title>
+  <link rel="stylesheet" href="/static/vendor/leaflet/leaflet.css" />
+  <link rel="stylesheet" href="/static/css/app.css" />
+  <script src="/static/vendor/leaflet/leaflet.js" defer></script>
+  <script type="module" src="/static/js/app.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><span class="logo">N</span><div><strong>Notana Care</strong><small>Care planning &amp; re-planning simulator</small></div></div>
+    <div class="badges">
+      <span id="b-scenario" class="badge muted">no scenario</span>
+      <span id="b-travel" class="badge muted" title="Active travel-time source">travel: –</span>
+      <span id="b-llm" class="badge muted" title="Optional planning advisor">advisor: –</span>
+      <span id="b-valid" class="badge muted" title="Independent validator result">not validated</span>
+      <span id="b-job" class="badge job hidden"><span class="spinner"></span><span id="b-job-text">working…</span></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <aside class="sidebar">
+      <details open class="card">
+        <summary>1 · Scenario (synthetic data)</summary>
+        <form id="f-scenario" class="form">
+          <label>Seed <input name="seed" type="number" value="42" /></label>
+          <label>Interventions <input name="target_interventions" type="number" value="5000" min="100" max="12000" step="100" /></label>
+          <label>Employees <input name="employee_count" type="number" value="100" min="2" max="300" /></label>
+          <label>Area <select name="area" id="sel-area"></select></label>
+          <label>Staffing pressure <input name="staffing_pressure" type="range" min="0" max="1" step="0.05" value="0.3" /><output></output></label>
+          <label>Double-staffed share <input name="double_staffing_pct" type="range" min="0" max="0.4" step="0.01" value="0.12" /><output></output></label>
+          <label>Strict time windows <input name="strict_window_pct" type="range" min="0" max="1" step="0.05" value="0.3" /><output></output></label>
+          <label>Skill/delegation share <input name="skill_requirement_pct" type="range" min="0" max="1" step="0.05" value="0.55" /><output></output></label>
+          <label>Travel multiplier <input name="travel_time_multiplier" type="number" min="0.3" max="4" step="0.05" value="1" /></label>
+          <label>Sync tolerance (min) <input name="double_staffing_sync_tolerance" type="number" min="0" max="15" value="0" /></label>
+          <label class="check"><input name="breaks_enabled" type="checkbox" checked /> Meal breaks</label>
+          <label>Travel source <select name="travel_provider"><option value="auto">auto (Google if key set)</option><option value="synthetic">synthetic</option><option value="google">Google Routes</option></select></label>
+          <button type="submit" class="primary">Generate scenario</button>
+        </form>
+      </details>
+
+      <details open class="card">
+        <summary>2 · Optimise the day</summary>
+        <form id="f-plan" class="form">
+          <label>Strategy <select name="strategy" id="sel-strategy"></select></label>
+          <label>Time limit (s) <input name="time_limit_s" type="number" value="25" min="2" max="300" /></label>
+          <label>Approved overtime (min) <input name="max_overtime_min" type="number" value="0" min="0" max="120" /></label>
+          <details class="sub"><summary>Objective weights</summary><div id="weights" class="weights"></div></details>
+          <button type="submit" class="primary" disabled>Optimise</button>
+        </form>
+      </details>
+
+      <details open class="card">
+        <summary>3 · Real-time incidents</summary>
+        <form id="f-incident" class="form">
+          <label>Clock <input name="clock" type="time" value="10:14" step="60" /></label>
+          <label>Incident <select name="kind" id="sel-incident">
+            <option value="employee_sick">Employee calls in sick</option>
+            <option value="medication_moved">Medication / injection moved</option>
+            <option value="traffic">Traffic disruption</option>
+            <option value="employee_delayed">Employee delayed</option>
+            <option value="extra_staff">Extra pool staff</option>
+            <option value="visit_cancelled">Visit cancelled</option>
+          </select></label>
+          <div id="incident-fields"></div>
+          <label>Re-plan strategy <select name="strategy" id="sel-strategy2"></select></label>
+          <button type="submit" class="primary" disabled>Apply &amp; re-plan</button>
+        </form>
+        <div id="plan-history" class="history"></div>
+      </details>
+    </aside>
+
+    <main class="main">
+      <section id="kpis" class="kpis"><div class="empty">Generate a scenario to begin. All people and addresses are synthetic.</div></section>
+      <nav class="tabs" id="tabs">
+        <button data-tab="map" class="active">Map</button>
+        <button data-tab="timeline">Timeline</button>
+        <button data-tab="conflicts">Unplanned / conflicts <span id="t-conf" class="count"></span></button>
+        <button data-tab="replan">Re-planning</button>
+        <button data-tab="score">Score &amp; validation</button>
+        <button data-tab="experiments">Experiments</button>
+      </nav>
+      <section class="tab" id="tab-map">
+        <div class="toolbar">
+          <label>Employee <select id="sel-emp"><option value="">— all routes (faint) —</option></select></label>
+          <label class="check"><input type="checkbox" id="chk-routes" checked /> show routes</label>
+          <span class="legend"><i class="dot ok"></i>all visits planned <i class="dot warn"></i>some unplanned <i class="sq"></i>team office</span>
+        </div>
+        <div id="map"></div>
+      </section>
+      <section class="tab hidden" id="tab-timeline">
+        <div class="toolbar">
+          <label>Team <select id="sel-team"><option value="">all teams</option></select></label>
+          <label>Sort <select id="sel-sort"><option value="shift">by shift</option><option value="team">by team</option><option value="load">by workload</option></select></label>
+          <label class="check"><input type="checkbox" id="chk-changed" /> only changed routes</label>
+          <span class="legend"><i class="blk p5"></i>priority 5 <i class="blk p4"></i>4 <i class="blk p3"></i>≤3 <i class="blk dbl"></i>double-staffed <i class="blk brk"></i>break/gap <i class="blk chg"></i>changed vs previous plan <i class="blk lck"></i>started/locked</span>
+        </div>
+        <div id="gantt" class="gantt"></div>
+      </section>
+      <section class="tab hidden" id="tab-conflicts"><div id="conflicts"></div></section>
+      <section class="tab hidden" id="tab-replan"><div id="replan"></div></section>
+      <section class="tab hidden" id="tab-score"><div id="score"></div></section>
+      <section class="tab hidden" id="tab-experiments">
+        <form id="f-exp" class="form inline">
+          <label>Seed <input name="seed" type="number" value="42" /></label>
+          <label>Interventions <input name="target_interventions" type="number" value="5000" step="100" /></label>
+          <label>Employees <input name="employee_count" type="number" value="100" /></label>
+          <label>Base plan time (s) <input name="base_time_limit_s" type="number" value="25" min="2" max="120" /></label>
+          <fieldset><legend>Strategies</legend>
+            <label class="check"><input type="checkbox" name="s" value="baseline" checked /> A baseline</label>
+            <label class="check"><input type="checkbox" name="s" value="enhanced" checked /> B enhanced repair</label>
+            <label class="check"><input type="checkbox" name="s" value="advisor" checked /> C advisor</label>
+            <label class="check"><input type="checkbox" name="s" value="classifier" checked /> D classifier</label>
+          </fieldset>
+          <button class="primary" type="submit">Run experiment</button>
+          <p class="hint">Same seed, visits, employees, travel matrix, baseline plan and incident sequence (2 sick at 10:14, traffic in Södermalm, a delay, a medication move) for every strategy. Takes a few minutes.</p>
+        </form>
+        <div id="experiment"></div>
+      </section>
+    </main>
+  </div>
+
+  <aside id="drawer" class="drawer hidden"><button class="close" id="drawer-close" aria-label="Close">×</button><div id="drawer-body"></div></aside>
+  <div id="toast" class="toast hidden"></div>
+</body>
+</html>

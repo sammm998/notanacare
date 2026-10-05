@@ -281,8 +281,13 @@ def validate_plan(
                 tick("breaks")
                 ok = [b for b in break_stops if b.end - b.start >= rule.duration_minutes]
                 if not ok:
-                    sick_early = any(iv.start <= rule.earliest_start for iv in emp.unavailable)
-                    if sick_early:
+                    # Employee stops working (sick / sent home) before the break could
+                    # have ended: the break requirement lapses with the rest of the shift.
+                    stopped = any(
+                        iv.end >= emp.shift_end and iv.start <= rule.latest_start + rule.duration_minutes
+                        for iv in emp.unavailable
+                    )
+                    if stopped:
                         continue
                     err(
                         "BREAK_MISSING",
