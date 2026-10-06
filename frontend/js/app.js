@@ -1,12 +1,12 @@
 import { api, runJob } from "./api.js";
 import { changedVisits, renderGantt } from "./gantt.js";
 import { initMap, invalidate, renderItinerary, renderMap, renderTeamLegend } from "./map.js";
-import { renderConflicts, renderExperiment, renderHistory, renderKpis, renderLiveFeed, renderML, renderReplan, renderScore, renderVisit, renderWeek } from "./panels.js";
-import { $, $$, esc, hhmm, parseHHMM, toast } from "./util.js";
+import { renderConflicts, renderExperiment, renderHistory, renderInterventionHead, renderInterventionRows, renderKpis, renderLiveFeed, renderML, renderReplan, renderScore, renderVisit, renderWeek } from "./panels.js";
+import { $, $$, esc, fmtNum, hhmm, parseHHMM, toast } from "./util.js";
 
 const state = {
   meta: null, health: null, scenario: null, plan: null, parent: null, lastIncident: null,
-  visitsById: {}, empsById: {}, tab: "map", selectedEmp: "", selectedVisit: null, mapMode: "employee",
+  visitsById: {}, empsById: {}, tab: "iv", iv: { offset: 0, key: "" }, selectedEmp: "", selectedVisit: null, mapMode: "employee",
   week: null, // week summary (week scenarios only)
   suggestions: null, autofix: null, // unplanned-visit solutions for the current plan
   live: { job: null, feed: [] },
@@ -66,6 +66,36 @@ function indexScenario(sc) {
   $("#sel-team").innerHTML = '<option value="">all teams</option>' + sc.zones.map((z) => `<option>${esc(z)}</option>`).join("");
   $("#f-plan button").disabled = false;
   renderWeekBar();
+}
+
+// ------------------------------------------------------------------ interventions (Insatser)
+const IV_PAGE = 100;
+let ivTimer = null;
+
+async function loadInterventions(more) {
+  if (!state.scenario) return;
+  const q = $("#iv-q").value.trim();
+  const filter = $("#iv-filter").value || "all";
+  const pid = state.plan?.id || "";
+  const key = `${state.scenario.id}|${pid}|${q}|${filter}`;
+  if (!more && key === state.iv.key) return; // already shown
+  const offset = more ? state.iv.offset : 0;
+  try {
+    const d = await withSession(() => api("GET", `/api/scenarios/${state.scenario.id}/interventions?plan_id=${encodeURIComponent(pid)}&q=${encodeURIComponent(q)}&filter=${filter}&offset=${offset}&limit=${IV_PAGE}`));
+    if (!$("#iv-filter").options.length) {
+      $("#iv-filter").innerHTML = Object.entries(d.summary.filters).map(([k, v]) => `<option value="${k}">${esc(v)}</option>`).join("");
+    }
+    renderInterventionHead($("#iv-head"), d, !!state.plan);
+    renderInterventionRows($("#iv-table"), d.rows, more, openVisit);
+    state.iv = { offset: offset + d.rows.length, key };
+    const left = d.total - state.iv.offset;
+    $("#iv-more").innerHTML = left > 0
+      ? `Visar ${fmtNum(state.iv.offset)} av ${fmtNum(d.total)} · <button id="btn-iv-more">Visa ${Math.min(IV_PAGE, left)} till</button>`
+      : `${fmtNum(d.total)} insatser`;
+    $("#btn-iv-more")?.addEventListener("click", () => loadInterventions(true));
+  } catch (err) {
+    handleError(err);
+  }
 }
 
 // ------------------------------------------------------------------ unplanned solutions
@@ -319,6 +349,7 @@ function render() {
     team: $("#sel-team").value, sort: $("#sel-sort").value, onlyChanged: $("#chk-changed").checked, selectedVisit: state.selectedVisit,
   }, openVisit, selectEmployee);
   if (t === "conflicts") renderConflicts($("#conflicts"), state, openVisit, conflictActions);
+  if (t === "iv") loadInterventions(false);
   if (t === "live") renderLiveFeed($("#live-feed"), state.live.feed, showPlan);
   if (t === "ml") {
     renderML($("#ml"), state.ml);
@@ -561,6 +592,8 @@ function wire() {
   });
 
   $("#btn-plan-week").addEventListener("click", planWeek);
+  $("#iv-q").addEventListener("input", () => { clearTimeout(ivTimer); ivTimer = setTimeout(() => loadInterventions(false), 250); });
+  $("#iv-filter").addEventListener("change", () => loadInterventions(false));
   $("#btn-ml-train").addEventListener("click", async () => {
     try {
       state.ml = await runJob(api("POST", "/api/ml/train"), "Training");

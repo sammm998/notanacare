@@ -33,6 +33,7 @@ from .replanning import clone_world, replan_with_strategy
 from .store import Database, Session, SessionStore
 from .travel import make_provider
 from .validator import validate_plan
+from . import intervention_view as IV
 from .live import run_live
 from .ml.cases import generate_cases
 from .ml.model import selector
@@ -771,6 +772,30 @@ def cancel_job(jid: str) -> dict:
         raise HTTPException(404, "unknown job")
     job["cancel"] = True
     return {"job_id": jid, "cancel": True}
+
+
+_IV_CACHE: dict[tuple[str, str | None], list[dict]] = {}
+
+
+@app.get("/api/scenarios/{sid}/interventions")
+def scenario_interventions(sid: str, plan_id: str | None = None, q: str = "", filter: str = "all",
+                           offset: int = 0, limit: int = 100) -> dict:
+    """Every single intervention with its visit, recipient, need, time, requirements and
+    assignment (or why it is unassigned). Filtered and paged on the server."""
+    s = _session(sid)
+    pid = plan_id or s.current_plan_id
+    plan = s.plans.get(pid) if pid else None
+    world = WORLD_SNAPSHOTS.get(pid, s.world) if pid else s.world
+    key = (sid, pid)
+    if key not in _IV_CACHE:
+        if len(_IV_CACHE) > 40:
+            _IV_CACHE.clear()
+        _IV_CACHE[key] = IV.rows(world, plan)
+    rows_ = _IV_CACHE[key]
+    if filter not in IV.FILTERS:
+        raise HTTPException(400, f"unknown filter; choose from {list(IV.FILTERS)}")
+    return {"summary": IV.summary(world, plan, rows_),
+            **IV.query(rows_, q, filter, max(0, offset), max(1, min(limit, 500)))}
 
 
 @app.get("/api/scenarios/{sid}/history")

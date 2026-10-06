@@ -87,7 +87,8 @@
       </div>
       <section id="kpis" class="kpis"><div class="empty">Generate a scenario to begin. All people and addresses are synthetic.</div></section>
       <nav class="tabs" id="tabs">
-        <button data-tab="map" class="active">Map</button>
+        <button data-tab="iv" class="active">Insatser</button>
+        <button data-tab="map">Map</button>
         <button data-tab="timeline">Timeline</button>
         <button data-tab="conflicts">Unplanned / conflicts <span id="t-conf" class="count"></span></button>
         <button data-tab="replan">Re-planning</button>
@@ -97,7 +98,16 @@
         <button data-tab="experiments">Experiments</button>
         <button data-tab="ml">Machine learning</button>
       </nav>
-      <section class="tab" id="tab-map">
+      <section class="tab" id="tab-iv">
+        <div id="iv-head"><div class="empty">Generera ett scenario för att se insatserna.</div></div>
+        <div class="iv-tools">
+          <input id="iv-q" type="search" placeholder="Sök insats, brukare, besök, kompetens eller medarbetare" autocomplete="off" />
+          <select id="iv-filter"></select>
+        </div>
+        <div id="iv-table" class="scroll"></div>
+        <div id="iv-more" class="iv-more"></div>
+      </section>
+      <section class="tab hidden" id="tab-map">
         <div class="toolbar">
           <div class="seg" id="map-mode" role="tablist">
             <button data-mode="employee" class="active">One employee's day</button>

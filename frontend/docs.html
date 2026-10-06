@@ -251,7 +251,7 @@ footer { margin-top: 64px; padding-top: 18px; border-top: 1px solid var(--line);
         <tr><td>Intim omvårdnad</td><td>Hygien, dusch, toalett, av-/påklädning, kateter, mun- och hudvård, sänggående</td></tr>
       </tbody>
     </table></div>
-    <p>Gränssnittet visar resultatet på <b>insatsnivå</b>: antal och andel av insatserna som är planerade och oplanerade.</p>
+    <p>Fliken <b>Insatser</b> (förstasidan) visar dagen i insatser. Den har fyra nyckeltal: planerade insatser av totalen (med andel och besök), oplanerade besök (med prioritetsvikt), personal med godkänt schema enligt validatorn och kontinuitet (med körtid och iterationer). Därunder finns en sökbar tabell med alla enskilda insatser: insats och besök, brukare, omsorgsbehov, tidsfönster och längd, krav och tilldelning. En insats utan tilldelning visar sitt skäl. Filter: tilldelade, utan tilldelning, tidskritiska, dubbelbemanning och med krav. Sökning och sidindelning görs på servern (<code>GET /api/scenarios/{id}/interventions</code>).</p>
 
     <h2 id="motorn">Planeringsmotorn steg för steg</h2>
     <p>Samma pipeline används för hela dagen, för varje omplaneringsfas, för förslag och för varje dag i en vecka. Medarbetarna är "fordon" med egen start, eget slut, egna raster och egen restidsmatris (bil eller cykel). Varje besöksroll är en nod.</p>

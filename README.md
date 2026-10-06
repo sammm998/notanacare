@@ -29,7 +29,10 @@ python -m uvicorn notana_planner.api:app --port 8000    # open http://localhost:
 1. **Generate scenario** (default: Stockholm, seed 42, ~5,000 interventions → ~590 visits, ~158 recipients, 100 employees).
    Choose *Horizon: a week* to get Monday–Sunday (≈35,000 interventions, 140 employees with rosters).
 2. **Optimise** (≈25 s). The header shows **VALID ✓ (independent validator)** or **INVALID** with the violations.
-3. Explore the **Map**, **Timeline** (Gantt), **Unplanned / conflicts** (each with a reason) and **Score & validation**.
+3. The **Insatser** tab (first) shows the day in interventions: planned of ~5,000, unplanned visits,
+   staff with a compliant schedule, continuity, and a searchable table of every single intervention
+   with recipient, need, time, requirements and assignment (or why not).
+   Explore the **Map**, **Timeline** (Gantt), **Unplanned / conflicts** (each with a reason) and **Score & validation**.
 4. Set the **clock** (e.g. 10:14), apply an **incident** and read the **Re-planning report** (before/after, phases used, every changed visit).
 5. **Experiments** tab: run strategies A–D on the same scenario and incidents.
 6. Week scenarios: pick a day in the **Week** bar, or **Optimise whole week**; the **Week** tab shows

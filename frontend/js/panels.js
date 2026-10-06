@@ -358,3 +358,55 @@ export function renderML(el, d) {
       ${d.recent.map((c) => `<tr><td>${esc(c.source)}</td><td>${esc(c.incident.kind)} ${hhmm(c.incident.clock)}</td><td><b>${esc(c.best)}</b></td>${Object.keys(ACTION_TEXT).map((a) => `<td class="num">${c.scores[a] ?? "–"}</td>`).join("")}</tr>`).join("")}
     </tbody></table></div>`;
 }
+
+
+export function renderInterventionHead(el, d, hasPlan) {
+  const s = d.summary;
+  const pctTxt = (a, b) => (b ? `${Math.round(1000 * a / b) / 10} %` : "–");
+  if (!hasPlan) {
+    el.innerHTML = `<div class="iv-hero"><div><div class="eyebrow">Simulerad dag · ej optimerad</div><h2>Dagens insatser</h2>
+      <div class="sub">${esc(s.area)} · Hemtjänst · seed ${s.seed}</div></div></div>
+      <div class="iv-count"><h3>${fmtNum(s.interventions_total)} enskilda insatser</h3><span class="r">Optimera dagen för att tilldela dem</span></div>
+      <p class="hint">${s.visits_total} besök · ${s.recipients} brukare · ${s.employees} medarbetare</p>`;
+    return;
+  }
+  const cls = s.valid ? (s.approved_exceptions ? "warn" : "") : "bad";
+  el.innerHTML = `
+    <div class="iv-hero"><div><div class="eyebrow">Optimerad dag</div><h2>Dagens omsorgsplan</h2>
+      <div class="sub">${esc(s.area)} · Hemtjänst · ${esc(s.weekday)} · seed ${s.seed}</div></div>
+      <div class="iv-status ${cls}" title="Oberoende validator">${s.valid ? (s.approved_exceptions ? "VALID*" : "VALID") : "INVALID"}</div></div>
+    <div class="iv-cards">
+      <div class="iv-card"><div class="k">Planerade insatser</div><div class="n">${fmtNum(s.interventions_assigned)}</div>
+        <div class="s">av ${fmtNum(s.interventions_total)} insatser (${pctTxt(s.interventions_assigned, s.interventions_total)}) · ${s.visits_planned}/${s.visits_total} besök</div></div>
+      <div class="iv-card"><div class="k">Oplanerade besök</div><div class="n ${s.visits_unplanned ? "bad" : ""}">${s.visits_unplanned}</div>
+        <div class="s">Prioritetsvikt ${s.unplanned_priority_weight} · ${s.unplanned_high_priority} med prio 5</div></div>
+      <div class="iv-card"><div class="k">Personal med godkänt schema</div><div class="n">${s.staff_compliant}/${s.staff_working}</div>
+        <div class="s">Arbetstidslagen, kompetens, önskemål – oberoende validator</div></div>
+      <div class="iv-card"><div class="k">Kontinuitet</div><div class="n">${s.continuity != null ? Math.round(100 * s.continuity) + " %" : "–"}</div>
+        <div class="s">känd personal · ${s.runtime_s ?? "–"} s · ${s.iterations ?? "–"} iterationer</div></div>
+    </div>
+    <div class="iv-note">Hemtjänst · kontrollerat: ${s.rules_checked.map(esc).join(" · ")} · Inte verifierat mot kollektivavtal · <b>${fmtNum(s.interventions_unassigned)} insatser saknar tilldelning</b></div>
+    <div class="iv-count"><h3>${fmtNum(s.interventions_total)} enskilda insatser</h3>
+      <span class="r">${fmtNum(s.interventions_assigned)} tilldelade · ${fmtNum(s.interventions_unassigned)} utan tilldelning</span></div>
+    <p class="hint" style="margin-top:-6px">${s.visits_total} besök · ${s.recipients} brukare · ${s.employees} medarbetare</p>`;
+}
+
+export function renderInterventionRows(el, rows, append, onVisit) {
+  const body = rows.map((r) => `<tr class="click" data-visit="${esc(r.visit_id)}">
+      <td class="mono">${esc(r.id)}<br><span class="hint">${esc(r.visit_id)}</span></td>
+      <td>${esc(r.recipient)}<br><span class="hint">${esc(r.recipient_id)} · ${esc(r.zone)}</span></td>
+      <td>${esc(r.need)}${r.double ? ' <span class="pill">2 personal</span>' : ""}</td>
+      <td class="mono">${esc(r.window)}<br><span class="hint">${r.duration} min · ${esc(r.timing)}</span></td>
+      <td>${r.requirements.length ? r.requirements.map((x) => `<span class="pill">${esc(x)}</span>`).join("") : "Grundkompetens"}</td>
+      <td>${r.status === "assigned"
+        ? `<b>${r.staff.map((x) => esc(x.name)).join(" + ")}</b><br><span class="hint">${r.staff.map((x) => esc(x.id)).join(" + ")} · start ${esc(r.start)}</span>`
+        : r.status === "cancelled" ? '<span class="hint">Inställt</span>'
+        : `<span class="unassigned">Utan tilldelning</span>${r.reason ? `<div class="why"><span class="code">${esc(r.reason.code)}</span> ${esc(r.reason.message)}</div>` : ""}`}</td>
+    </tr>`).join("");
+  if (append) {
+    el.querySelector("tbody").insertAdjacentHTML("beforeend", body);
+  } else {
+    el.innerHTML = `<table><thead><tr><th>Insats / besök</th><th>Brukare</th><th>Omsorgsbehov</th><th>Tid / längd</th><th>Krav</th><th>Tilldelning</th></tr></thead><tbody>${body}</tbody></table>`;
+  }
+  el.querySelectorAll("tr[data-visit]").forEach((tr) => { tr.onclick = () => onVisit(tr.dataset.visit); });
+}
