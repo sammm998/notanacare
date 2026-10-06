@@ -118,28 +118,40 @@ class RoutingSolver:
         routing = pywrapcp.RoutingModel(manager)
         solver = routing.solver()
 
-        rows = tm.rows()
+        # One time / cost matrix per travel mode (car, bike ...): vehicles that share
+        # a TravelMatrix share the registered callbacks.
+        groups: dict[int, tuple[object, list[int]]] = {}
+        for vi, v in enumerate(p.vehicles):
+            vtm = v.travel or tm
+            groups.setdefault(id(vtm), (vtm, []))[1].append(vi)
         li = [tm.index[loc] for loc in node_loc]
         km_rows = tm.base.km
-        time_m: list[list[int]] = []
-        cost_m: list[list[int]] = []
-        for i in range(N):
-            ri = rows[li[i]]
-            kri = km_rows[li[i]]
-            svc = node_svc[i]
-            if V <= i < 2 * V:  # end nodes have no outgoing arcs
-                time_m.append([0] * N)
-                cost_m.append([0] * N)
-                continue
-            trow = [0 if j in free_in else ri[li[j]] for j in range(N)]
-            time_m.append([svc + x for x in trow])
-            cost_m.append([w.travel_minute * trow[j] + int(w.travel_km * kri[li[j]]) for j in range(N)])
-        _dbg("matrices built", t0)
-        time_cb = routing.RegisterTransitMatrix(time_m)
-        cost_cb = routing.RegisterTransitMatrix(cost_m)
-        routing.SetArcCostEvaluatorOfAllVehicles(cost_cb)
-
-        routing.AddDimension(time_cb, HORIZON, HORIZON, False, "Time")
+        time_cb_of: dict[int, int] = {}
+        for gtm, members in groups.values():
+            rows = gtm.rows()  # type: ignore[attr-defined]
+            time_m: list[list[int]] = []
+            cost_m: list[list[int]] = []
+            for i in range(N):
+                ri = rows[li[i]]
+                kri = km_rows[li[i]]
+                svc = node_svc[i]
+                if V <= i < 2 * V:  # end nodes have no outgoing arcs
+                    time_m.append([0] * N)
+                    cost_m.append([0] * N)
+                    continue
+                trow = [0 if j in free_in else ri[li[j]] for j in range(N)]
+                time_m.append([svc + x for x in trow])
+                cost_m.append([w.travel_minute * trow[j] + int(w.travel_km * kri[li[j]]) for j in range(N)])
+            time_cb = routing.RegisterTransitMatrix(time_m)
+            cost_cb = routing.RegisterTransitMatrix(cost_m)
+            for vi in members:
+                time_cb_of[vi] = time_cb
+                routing.SetArcCostEvaluatorOfVehicle(cost_cb, vi)
+        _dbg(f"matrices built ({len(groups)} travel modes)", t0)
+        if len(groups) == 1:
+            routing.AddDimension(time_cb_of[0], HORIZON, HORIZON, False, "Time")
+        else:
+            routing.AddDimensionWithVehicleTransits([time_cb_of[vi] for vi in range(V)], HORIZON, HORIZON, False, "Time")
         tdim = routing.GetDimensionOrDie("Time")
         tdim.SetSpanCostCoefficientForAllVehicles(w.idle_minute)
 

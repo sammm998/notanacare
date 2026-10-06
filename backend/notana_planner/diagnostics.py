@@ -49,7 +49,7 @@ def _gaps(scenario: Scenario, travel: TravelMatrix, plan: Plan, eid: str, v: Vis
     stops = sorted(route.stops, key=lambda s: s.start) if route else []
     start_loc = (route.start_location_id if route and route.start_location_id else emp.start_location_id)
     end_loc = emp.end_location_id
-    t = (lambda a, b: 0) if zero_travel else travel.minutes
+    t = (lambda a, b: 0) if zero_travel else travel.for_employee(emp).minutes
     avail = max(emp.shift_start, emp.available_from or 0)
     # Free stretches between fixed stops
     segments = []

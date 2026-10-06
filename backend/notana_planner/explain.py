@@ -237,7 +237,7 @@ def explain_visit(world: "World", plan: Plan, visit_id: str, reference: Plan | N
             st = stops[idx]
             prev = stops[idx - 1] if idx > 0 else None
             nxt = stops[idx + 1] if idx + 1 < len(stops) else None
-            to_next = tm.minutes(st.location_id, nxt.location_id if nxt else (route.end_location_id or e.end_location_id))
+            to_next = tm.for_employee(e).minutes(st.location_id, nxt.location_id if nxt else (route.end_location_id or e.end_location_id))
             # Why this employee: structured factors
             reasons = []
             have = [s for s in v.required_skills if s in e.skills]

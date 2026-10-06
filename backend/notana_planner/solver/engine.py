@@ -275,7 +275,7 @@ class SolveEngine:
                 r_start[eid] = r.vehicle.start_time
                 last_loc = r.stops[-1].location if r.stops else r.vehicle.start_location
                 last_end = (starts[-1] + r.stops[-1].duration) if r.stops else r.vehicle.start_time
-                r_end[eid] = last_end + p.travel.minutes(last_loc, r.vehicle.end_location)
+                r_end[eid] = last_end + (r.vehicle.travel or p.travel).minutes(last_loc, r.vehicle.end_location)
         # ---- 6. fixed-time gap fill -----------------------------------------
         if unplanned and self.opt.repair_insertion:
             filled = _gap_fill(p, tasks, out_routes, r_start, r_end, unplanned)
@@ -329,7 +329,7 @@ def _free_intervals(
 ) -> list[tuple[int, int, int]]:
     """(lo, hi, position) start intervals for ``task`` between fixed stops."""
     v = next(x for x in p.vehicles if x.employee_id == eid)
-    tm = p.travel
+    tm = v.travel or p.travel
     out = []
     prev_loc, prev_end = v.start_location, v.start_time
     seq = stops + [None]
@@ -417,11 +417,12 @@ def _gap_fill(
             stops = routes[eid]
             stops.insert(pos, SolvedStop("visit", vid, role, t.location_id, t.duration, s))
             # Keep departure / return consistent with the new first / last stop.
-            depart = s - p.travel.minutes(v.start_location, t.location_id)
+            vtm = v.travel or p.travel
+            depart = s - vtm.minutes(v.start_location, t.location_id)
             if pos == 0:
                 r_start[eid] = min(r_start.get(eid, depart), depart)
             if pos == len(stops) - 1:
-                ret = s + t.duration + p.travel.minutes(t.location_id, v.end_location)
+                ret = s + t.duration + vtm.minutes(t.location_id, v.end_location)
                 r_end[eid] = max(r_end.get(eid, ret), ret)
         busy.setdefault(t.recipient_id, []).append((chosen[0][2], chosen[0][2] + t.duration))
         filled.add(vid)

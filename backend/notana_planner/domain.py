@@ -52,6 +52,16 @@ class CareRecipient:
     preferred_employee_ids: list[str] = field(default_factory=list)
     avoid_employee_ids: list[str] = field(default_factory=list)  # hard exclusion
     known_employee_ids: list[str] = field(default_factory=list)  # continuity history
+    # Preferences about who comes. gender_preference: None | "F" | "M";
+    # gender_strict: hard requirement (else a weighted wish); gender_scope:
+    # "intimate" (hygiene, shower, toileting, dressing...) or "all" visits.
+    gender_preference: str | None = None
+    gender_strict: bool = False
+    gender_scope: str = "intimate"
+    languages: list[str] = field(default_factory=list)  # preferred languages besides Swedish
+    language_required: bool = False  # e.g. dementia + mother tongue: hard requirement
+    pets: list[str] = field(default_factory=list)  # "dog" | "cat"
+    smokes: bool = False
 
 
 @dataclass(slots=True)
@@ -91,6 +101,7 @@ class Visit:
     locked: bool = False
     status: VisitStatus = VisitStatus.UNPLANNED
     slot: str = ""  # morning / midday / afternoon / evening (generation metadata)
+    intimate_care: bool = False  # contains hygiene / shower / toileting / dressing ...
 
 
 @dataclass(slots=True)
@@ -128,6 +139,38 @@ class Employee:
     # start the next not-yet-started visit, and where they are at that time.
     available_from: int | None = None
     current_location_id: str | None = None
+    # Person attributes and wishes
+    gender: str = "F"  # "F" | "M"
+    languages: list[str] = field(default_factory=lambda: ["sv"])
+    pet_allergies: list[str] = field(default_factory=list)  # cannot work where these pets live
+    avoid_smoking: bool = False  # work-environment: no smoking homes
+    travel_mode: str = "car"  # "car" | "bike" (does not drive: bike / public transport)
+    preferred_zones: list[str] = field(default_factory=list)  # wish, weighted
+    contract_minutes_per_week: int = 2400  # sysselsättningsgrad (40 h = full time)
+    shift_name: str = ""
+
+    @property
+    def travel_factor(self) -> float:
+        return BIKE_TRAVEL_FACTOR if self.travel_mode == "bike" else 1.0
+
+
+# Door-to-door travel time relative to a car for employees who do not drive
+# (bike / public transport in a dense Swedish city; parking overhead is lower).
+BIKE_TRAVEL_FACTOR = 1.35
+
+WEEKDAYS = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+
+
+@dataclass(slots=True)
+class WorkingTimeRules:
+    """Arbetstidslagen (ATL) + typical collective-agreement limits. All hard."""
+
+    enabled: bool = True
+    max_continuous_work_min: int = 300  # ATL 15 §: no more than 5 h in a row without a break
+    max_daily_work_min: int = 600  # collective agreement: max 10 h paid work per day
+    min_daily_rest_min: int = 660  # ATL 13 §: 11 h dygnsvila per 24 h
+    min_weekly_rest_min: int = 2160  # ATL 14 §: 36 h veckovila per 7 days
+    max_weekly_overtime_min: int = 300  # on top of the contracted weekly hours
 
 
 @dataclass(slots=True)
@@ -143,6 +186,8 @@ class ScenarioConfig:
     travel_time_multiplier: float = 1.0
     double_staffing_sync_tolerance: int = 0  # minutes
     breaks_enabled: bool = True
+    days: int = 1  # 1 = one day, 7 = a week (employee_count = staff on duty per day)
+    preferences_enabled: bool = True  # gender / language / pets / smoking / travel mode
 
 
 @dataclass(slots=True)
@@ -156,6 +201,12 @@ class Scenario:
     employees: dict[str, Employee]
     locations: dict[str, Location]
     bases: list[str]  # location ids of team offices
+    day: int = 0  # 0 = Monday
+    rules: WorkingTimeRules = field(default_factory=WorkingTimeRules)
+
+    @property
+    def weekday(self) -> str:
+        return WEEKDAYS[self.day % 7]
 
 
 # --------------------------------------------------------------------------
@@ -230,6 +281,7 @@ class Plan:
     validation: dict[str, Any] = field(default_factory=dict)
     travel_source: str = "synthetic"
     parent_plan_id: str | None = None
+    day: int = 0
 
 
 def to_jsonable(obj: Any) -> Any:

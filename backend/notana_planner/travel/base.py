@@ -109,6 +109,18 @@ class TravelMatrix:
     def source(self) -> str:
         return self.base.source
 
+    def for_factor(self, factor: float) -> "TravelMatrix":
+        """Same matrix for another travel mode (e.g. bike = 1.35 x car), same traffic."""
+        if abs(factor - 1.0) < 1e-9:
+            return self
+        cache = self.__dict__.setdefault("_mode_cache", {})
+        if factor not in cache:
+            cache[factor] = TravelMatrix(self.base, self.locations, self.scenario_multiplier * factor, self.traffic)
+        return cache[factor]
+
+    def for_employee(self, employee) -> "TravelMatrix":  # noqa: ANN001 - domain.Employee
+        return self.for_factor(getattr(employee, "travel_factor", 1.0))
+
     def with_traffic(self, traffic: TrafficConditions) -> "TravelMatrix":
         return TravelMatrix(self.base, self.locations, self.scenario_multiplier, traffic)
 

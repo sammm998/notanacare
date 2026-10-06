@@ -37,6 +37,7 @@ def assemble_plan(
     routes: dict[str, Route] = {}
 
     for eid, emp in scenario.employees.items():
+        etm = travel.for_employee(emp)  # car / bike
         if eid in keep_routes and previous is not None and eid in previous.routes:
             # Untouched route: same visits, same times. Started stops are locked;
             # travel data of future legs is refreshed to the current conditions
@@ -48,12 +49,12 @@ def assemble_plan(
                 started = clock is not None and s0.start <= clock
                 st = _copy_stop(s0, locked=True if started else None)
                 if not st.locked:
-                    st.travel_from_prev = 0 if st.kind == "unavailable" else travel.minutes(loc, st.location_id)
+                    st.travel_from_prev = 0 if st.kind == "unavailable" else etm.minutes(loc, st.location_id)
                     st.prev_location_id = loc
                 stops.append(st)
                 loc = st.location_id
             route_end = old.route_end
-            to_end = travel.minutes(loc, old.end_location_id or emp.end_location_id)
+            to_end = etm.minutes(loc, old.end_location_id or emp.end_location_id)
             if stops and route_end is not None:
                 route_end = max(route_end, stops[-1].end + to_end)
             routes[eid] = Route(
@@ -89,7 +90,7 @@ def assemble_plan(
                         location_id=s.location,
                         start=s.start,
                         end=s.start + s.duration,
-                        travel_from_prev=0 if kind == "unavailable" else travel.minutes(loc, s.location),
+                        travel_from_prev=0 if kind == "unavailable" else etm.minutes(loc, s.location),
                         prev_location_id=loc,
                     )
                 )
@@ -98,14 +99,14 @@ def assemble_plan(
                 route.route_start = output.route_start.get(eid, v.start_time)
             if solved or prefix:
                 route.route_end = output.route_end.get(eid)
-                route.travel_to_end = travel.minutes(loc, v.end_location)
+                route.travel_to_end = etm.minutes(loc, v.end_location)
             if not solved and not prefix:
                 route.route_start = None
                 route.route_end = None
         elif prefix:
             # Not part of the problem (e.g. sick): keep locked work, then go home.
             last = prefix[-1]
-            route.travel_to_end = travel.minutes(last.location_id, emp.end_location_id)
+            route.travel_to_end = etm.minutes(last.location_id, emp.end_location_id)
             route.route_end = None
         routes[eid] = route
 
@@ -133,7 +134,7 @@ def assemble_plan(
         if v is not None and len(a.employee_ids) < v.required_employee_count and not started:
             for eid in a.employee_ids:
                 routes[eid].stops = [s for s in routes[eid].stops if s.visit_id != vid]
-                _refresh_travel(routes[eid], travel, scenario.employees[eid].start_location_id, clock)
+                _refresh_travel(routes[eid], travel.for_employee(scenario.employees[eid]), scenario.employees[eid].start_location_id, clock)
             del assignments[vid]
             output.stats.setdefault("released_incomplete_doubles", []).append(vid)
 

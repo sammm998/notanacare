@@ -196,10 +196,12 @@ def _traffic(world: World, plan: Plan, inc: Incident) -> IncidentEffect:
         stops = [s for s in r.stops if s.start > inc.clock]
         if not stops:
             continue
+        emp = world.scenario.employees[eid]
+        etm = new_tm.for_employee(emp)
         prev = None
         for s in r.stops:
             if prev is not None and s.start > inc.clock:
-                if prev.end + new_tm.minutes(prev.location_id, s.location_id) > s.start:
+                if prev.end + etm.minutes(prev.location_id, s.location_id) > s.start:
                     affected.add(eid)
                     if s.visit_id:
                         late_visits.add(s.visit_id)
@@ -207,8 +209,7 @@ def _traffic(world: World, plan: Plan, inc: Incident) -> IncidentEffect:
         if zones and any(world.scenario.locations[s.location_id].zone in zones for s in stops):
             affected.add(eid)
         last = r.stops[-1]
-        emp = world.scenario.employees[eid]
-        ret = last.end + new_tm.minutes(last.location_id, r.end_location_id or emp.end_location_id)
+        ret = last.end + etm.minutes(last.location_id, r.end_location_id or emp.end_location_id)
         if ret > emp.shift_end + world.settings.max_overtime_min:
             affected.add(eid)  # can no longer get back before the shift ends
     released = set()

@@ -13,6 +13,7 @@ skills. The two roles are synchronised in time and must be different people.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Any
 
 from ..config import ObjectiveWeights, SolverSettings
 from ..domain import BreakRule, CareRecipient, Employee, Scenario, Visit
@@ -32,6 +33,7 @@ class VehicleSpec:
     break_location: str = ""  # breaks are taken at the team office
     fair_workload: int = 0
     max_workload: int | None = None
+    travel: Any = None  # this employee's TravelMatrix (car / bike); None = problem default
 
 
 @dataclass(slots=True)

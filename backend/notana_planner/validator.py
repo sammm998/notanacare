@@ -165,6 +165,7 @@ def validate_plan(
                 f"{eid} is {emp.status.value} but has {len(unlocked_visits)} non-locked visits",
                 employee_id=eid,
             )
+        etm = travel.for_employee(emp)  # car / bike
         start_loc = route.start_location_id or emp.start_location_id
         end_loc = route.end_location_id or emp.end_location_id
         hard_end = emp.shift_end + max(0, max_overtime)
@@ -193,7 +194,7 @@ def validate_plan(
             # they were driven under the conditions of that time).
             # An unavailability gap (split shift, appointment) starts wherever the
             # employee is; work resumes from the gap's location (the team office).
-            t = 0 if st.kind == "unavailable" else travel.minutes(prev_loc, st.location_id)
+            t = 0 if st.kind == "unavailable" else etm.minutes(prev_loc, st.location_id)
             historic = st.locked or (clock is not None and st.start <= clock)
             if not historic:
                 ready = prev_end
@@ -255,7 +256,7 @@ def validate_plan(
 
         # Return to end location
         if stops or route.route_end is not None:
-            t_end = travel.minutes(prev_loc, end_loc)
+            t_end = etm.minutes(prev_loc, end_loc)
             last_locked = bool(stops) and stops[-1].locked and route.route_end is None
             if route.route_end is None:
                 if not last_locked:

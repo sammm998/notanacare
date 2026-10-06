@@ -45,6 +45,7 @@ class WorkRoute:
 
 def _travel_chain(stops: list[Stop], v: VehicleSpec, tm: TravelMatrix) -> tuple[list[int], int]:
     """Travel time *into* each stop and from the last stop to the end location."""
+    tm = v.travel or tm
     into: list[int] = []
     cur = v.start_location
     for s in stops:

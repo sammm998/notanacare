@@ -72,8 +72,10 @@ def timetable(
     obj = []
     occurrences: dict[str, list[tuple[str, int]]] = {}
 
+    base_tm = tm
     for eid, route in routes.items():
         v = route.vehicle
+        tm = v.travel or base_tm
         lo, hi = v.start_time, max(v.start_time, v.end_time)
         r_start = m.NewIntVar(lo, hi, f"rs_{eid}")
         r_end = m.NewIntVar(lo, hi, f"re_{eid}")

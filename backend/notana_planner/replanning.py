@@ -104,10 +104,11 @@ def _employee_state(world: World, plan: Plan, eid: str, prefix: list[RouteStop],
         available_from=ready,
         location=loc,
         taken_break_ids=set(range(n_taken)),
+        travel=world.travel(),
     )
     if v is not None:
         # A meal break must stay reachable: leave at least the travel time to the office.
-        reach = v.start_time + world.travel().minutes(v.start_location, v.break_location or v.start_location)
+        reach = v.start_time + v.travel.minutes(v.start_location, v.break_location or v.start_location)
         for b in v.breaks:
             if b.kind == "break" and b.latest_start < reach:
                 b.latest_start = reach

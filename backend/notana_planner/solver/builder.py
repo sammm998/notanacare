@@ -14,6 +14,7 @@ def vehicle_for(
     available_from: int | None = None,
     location: str | None = None,
     taken_break_ids: set[int] | None = None,
+    travel: TravelMatrix | None = None,
 ) -> VehicleSpec | None:
     """Vehicle spec for an employee, honouring sickness and unavailability."""
     if emp.status != EmployeeStatus.WORKING:
@@ -56,6 +57,7 @@ def vehicle_for(
         breaks=breaks,
         break_location=emp.start_location_id,
         max_workload=emp.max_workload_minutes,
+        travel=travel.for_employee(emp) if travel is not None else None,
     )
 
 
@@ -99,7 +101,7 @@ def build_global_problem(
 ) -> PlanningProblem:
     vehicles = []
     for emp in scenario.employees.values():
-        v = vehicle_for(emp, settings)
+        v = vehicle_for(emp, settings, travel=travel)
         if v is not None:
             vehicles.append(v)
     ids = visit_ids if visit_ids is not None else sorted(scenario.visits)

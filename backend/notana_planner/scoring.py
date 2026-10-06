@@ -54,16 +54,17 @@ def score_plan(
         if not vstops:
             continue
         working += 1
+        etm = travel.for_employee(emp)
         loc = r.start_location_id or emp.start_location_id
         t_prev_end = r.route_start if r.route_start is not None else stops[0].start
         for s in stops:
-            t = travel.minutes(loc, s.location_id)
+            t = etm.minutes(loc, s.location_id)
             travel_min += t
             travel_km += travel.km(loc, s.location_id)
             idle_min += max(0, s.start - t_prev_end - t)
             loc = s.location_id
             t_prev_end = s.end
-        travel_min += travel.minutes(loc, r.end_location_id or emp.end_location_id)
+        travel_min += etm.minutes(loc, r.end_location_id or emp.end_location_id)
         travel_km += travel.km(loc, r.end_location_id or emp.end_location_id)
         care_by_emp[eid] = sum(s.end - s.start for s in vstops)
         if r.route_end is not None:
