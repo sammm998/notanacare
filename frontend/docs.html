@@ -334,13 +334,14 @@ footer { margin-top: 64px; padding-top: 18px; border-top: 1px solid var(--line);
         <tr><td><span class="pill off">resurs</span></td><td>Poolpersonal med besökets kompetenser och delegeringar, för området och tiden</td><td class="num">150</td></tr>
       </tbody>
     </table></div>
+    <p><b>Rekommenderad lösning per besök.</b> När man öppnar ett oplanerat besök räknas dess alternativ fram direkt (cirka 3 s). Det bästa visas överst med knappen <b>Acceptera</b>: ”Acceptera med avsteg” för ett avsteg och ”Kalla in poolpersonal” för en extra resurs. Övriga alternativ listas under. Alternativ som bryter mot patientsäkerheten (inte tillåtet) går inte att acceptera. Har besökets tidsfönster redan passerat klockan står det i stället för ett förslag.</p>
     <p>Att tillämpa ett avsteg skapar en plan med ett <b>godkänt avsteg</b>. Validatorn fortsätter att rapportera varje avvikelse, men som godkänd. Utan godkännandet är samma plan ogiltig. <b>Auto-fix within rules</b> omoptimerar först alla öppna besök med varmstart och planerar sedan om de närmaste rutterna per kvarvarande besök. Den redovisar nettot: hur många fler besök som blev planerade.</p>
 
     <h2 id="omplanering">Omplanering i realtid</h2>
     <p>Allt som har startat enligt klockan fryses. Därefter körs fas 1 (de drabbade plus 6 hjälpare med flest luckor, 3 h), fas 2 (24 hjälpare, resten av dagen) och fas 3 (alla). En fas godkänns om inget kommunicerat besök tappas och planen är giltig. Annars väljs den bästa fasen. Tidigare oplanerade besök är med i varje fas, så tid som frigörs kan användas. Rapporten skrivs från fakta och säger vilken fas som användes.</p>
 
     <h2 id="live">Live-dag och nya händelser</h2>
-    <p>Fliken <b>Live</b> kör klockan genom dagen. Händelserna kommer på slumpade (men reproducerbara) tider och planeras om direkt på 3–5 s. Varje händelse visas i ett flöde: vem som skickades och hur snabbt, vad som ändrades, vad som blev oplanerat och bästa förslaget.</p>
+    <p>Fliken <b>Live</b> kör klockan genom dagen. Händelserna kommer på slumpade (men reproducerbara) tider och planeras om direkt på 3–5 s. Varje händelse visas i ett flöde: vem som skickades och hur snabbt, vad som ändrades, vad som blev oplanerat och bästa förslaget. Med <b>Run 3 real-time incidents automatically</b> (förvalt) startar tre händelser av sig själva efter den första optimeringen.</p>
     <div class="tbl"><table>
       <thead><tr><th>Händelse</th><th>Så hanteras den</th></tr></thead>
       <tbody>
@@ -387,7 +388,7 @@ footer { margin-top: 64px; padding-top: 18px; border-top: 1px solid var(--line);
         <tr><td><code>POST /api/scenarios</code></td><td>Generera dag eller vecka (<code>days</code>)</td></tr>
         <tr><td><code>POST /api/scenarios/{id}/plan</code> · <code>POST /api/weeks/{id}/plan</code></td><td>Optimera dag eller vecka (jobb)</td></tr>
         <tr><td><code>POST /api/scenarios/{id}/incidents</code></td><td>Händelse + omplanering (jobb), inklusive <code>alarm</code> och <code>child_sick</code></td></tr>
-        <tr><td><code>POST /api/plans/{id}/suggestions</code> · <code>…/suggestions/{option}/apply</code> · <code>POST /api/plans/{id}/autofix</code></td><td>Lösningar för oplanerade besök</td></tr>
+        <tr><td><code>POST /api/plans/{id}/suggestions</code> · <code>POST /api/plans/{id}/visits/{visit}/suggestions</code> · <code>…/suggestions/{option}/apply</code> · <code>POST /api/plans/{id}/autofix</code></td><td>Lösningar för oplanerade besök</td></tr>
         <tr><td><code>POST /api/scenarios/{id}/live</code> · <code>POST /api/jobs/{id}/cancel</code></td><td>Live-dag (flödet finns i jobbet)</td></tr>
         <tr><td><code>GET /api/ml</code> · <code>POST /api/ml/train</code> · <code>POST /api/scenarios/{id}/ml/cases</code></td><td>Maskininlärning: status, träning, nya fall</td></tr>
         <tr><td><code>POST /api/experiments</code></td><td>Strategi A–E på samma fall</td></tr>

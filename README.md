@@ -32,7 +32,10 @@ python -m uvicorn notana_planner.api:app --port 8000    # open http://localhost:
 3. The **Insatser** tab (first) shows the day in interventions: planned of ~5,000, unplanned visits,
    staff with a compliant schedule, continuity, and a searchable table of every single intervention
    with recipient, need, time, requirements and assignment (or why not).
+   The header badge reads e.g. *Insatser: 4 812 av 5 004 planerade · 31 oplanerade · 1 903 utförda kl. 12:10*.
    Explore the **Map**, **Timeline** (Gantt), **Unplanned / conflicts** (each with a reason) and **Score & validation**.
+   Opening an unplanned visit shows a **recommended solution** with **Acceptera** (plus the other options).
+   With *Run 3 real-time incidents automatically* (on by default) three live events start after the first optimisation.
 4. Set the **clock** (e.g. 10:14), apply an **incident** and read the **Re-planning report** (before/after, phases used, every changed visit).
 5. **Experiments** tab: run strategies A–D on the same scenario and incidents.
 6. Week scenarios: pick a day in the **Week** bar, or **Optimise whole week**; the **Week** tab shows
@@ -351,6 +354,6 @@ involved (no API key).
 `POST /api/scenarios/{id}/visits/{vid}/lock` · `POST /api/experiments` → job ·
 `GET /api/scenarios/{id}/export` · `GET /api/weeks/{id}` (week summary + week validation) ·
 `POST /api/weeks/{id}/plan` → job · `POST /api/plans/{id}/suggestions` → job ·
-`POST /api/plans/{id}/suggestions/{option}/apply` · `POST /api/plans/{id}/autofix` → job ·
+`POST /api/plans/{id}/visits/{visit}/suggestions` · `POST /api/plans/{id}/suggestions/{option}/apply` · `POST /api/plans/{id}/autofix` → job ·
 `GET /api/ml` · `POST /api/ml/train` → job · `POST /api/scenarios/{id}/ml/cases?n=4` → job ·
 `POST /api/scenarios/{id}/live` → job (feed in the job) · `POST /api/jobs/{id}/cancel` · OpenAPI docs at `/docs`.

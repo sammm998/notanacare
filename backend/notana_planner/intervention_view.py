@@ -59,6 +59,8 @@ def rows(world: World, plan: Plan | None) -> list[dict[str, Any]]:
                 "requirements": reqs,
                 "double": it.requires_double_staffing or v.required_employee_count == 2,
                 "status": "cancelled" if cancelled else ("assigned" if a else "unassigned"),
+                "progress": (None if not a or not plan or plan.clock is None else
+                             "done" if a.end <= plan.clock else "ongoing" if a.start <= plan.clock else "upcoming"),
                 "start": fmt_time(a.start) if a else None,
                 "staff": staff,
                 "reason": reason,
@@ -109,6 +111,10 @@ def summary(world: World, plan: Plan | None, all_rows: list[dict]) -> dict:
     }
     if plan is None:
         return out
+    if plan.clock is not None:
+        out["clock"] = fmt_time(plan.clock)
+        out["interventions_done"] = sum(1 for r in active if r.get("progress") == "done")
+        out["interventions_ongoing"] = sum(1 for r in active if r.get("progress") == "ongoing")
     working = [e for e in sc.employees.values() if e.status == EmployeeStatus.WORKING]
     bad = {e["employee_id"] for e in plan.validation.get("errors", []) if e.get("employee_id")}
     rr = plan.solver_stats.get("ruin_recreate", {})

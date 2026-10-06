@@ -641,6 +641,23 @@ def get_suggestions(pid: str) -> dict:
     return _suggestions_payload(pid)
 
 
+@app.post("/api/plans/{pid}/visits/{vid}/suggestions")
+def visit_suggestions(pid: str, vid: str) -> dict:
+    """Options for one unplanned visit (recommended first), computed on demand."""
+    s, p = _current_plan(pid)
+    if vid not in p.unplanned:
+        raise HTTPException(400, f"{vid} is not unplanned in this plan")
+    v = s.world.scenario.visits.get(vid)
+    if v is not None and p.clock is not None and v.latest_start < p.clock:
+        return {"plan_id": pid, "visit_id": vid, "options": [],
+                "window_closed": fmt_time(v.latest_start), "clock": fmt_time(p.clock),
+                "reason": f"the time window closed at {fmt_time(v.latest_start)}, before the current clock {fmt_time(p.clock)}"}
+    with s.lock:
+        opts = suggest_for_plan(s.world, p, [vid], replan_time_s=2.5).get(vid, [])
+    SUGGESTIONS.setdefault(pid, {})[vid] = opts
+    return {"plan_id": pid, "visit_id": vid, "options": [public(o) for o in opts]}
+
+
 @app.post("/api/plans/{pid}/suggestions/{oid}/apply")
 def apply_suggestion(pid: str, oid: str) -> dict:
     s, p = _current_plan(pid)

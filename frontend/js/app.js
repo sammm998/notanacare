@@ -157,10 +157,10 @@ const conflictActions = {
 };
 
 // ------------------------------------------------------------------ live day
-async function startLive() {
+async function startLive(overrides = {}) {
   const f = $("#f-live");
   const body = { start: parseHHMM(f.start.value), end: parseHHMM(f.end.value), events: Number(f.events.value),
-    pace_s: Number(f.pace_s.value), seed: Number(f.seed.value) };
+    pace_s: Number(f.pace_s.value), seed: Number(f.seed.value), ...overrides };
   let job;
   try {
     job = await api("POST", `/api/scenarios/${state.scenario.id}/live`, body);
@@ -270,6 +270,31 @@ async function planWeek() {
   }
 }
 
+function updateInterventionBadge() {
+  const b = $("#b-iv");
+  const p = state.plan;
+  if (!p || !p.score?.interventions_total) {
+    const n = state.scenario?.counts?.interventions;
+    b.classList.toggle("hidden", !n);
+    if (n) b.textContent = `Insatser: ${fmtNum(n)} · inte planerade än`;
+    return;
+  }
+  const s = p.score;
+  let txt = `Insatser: ${fmtNum(s.interventions_planned)} av ${fmtNum(s.interventions_total)} planerade (${Math.round(1000 * s.interventions_planned_share) / 10} %) · ${fmtNum(s.interventions_unplanned)} oplanerade`;
+  if (p.clock != null) {
+    let done = 0;
+    let ongoing = 0;
+    for (const a of Object.values(p.assignments)) {
+      const n = state.visitsById[a.visit_id]?.interventions || 0;
+      if (a.end <= p.clock) done += n;
+      else if (a.start <= p.clock) ongoing += n;
+    }
+    txt += ` · ${fmtNum(done)} utförda kl. ${hhmm(p.clock)}${ongoing ? `, ${fmtNum(ongoing)} pågår` : ""}`;
+  }
+  b.textContent = txt;
+  b.classList.remove("hidden");
+}
+
 async function loadPlan(pid) {
   state.plan = await api("GET", `/api/plans/${pid}`);
   state.parent = state.plan.parent_plan_id ? await api("GET", `/api/plans/${state.plan.parent_plan_id}`) : null;
@@ -334,6 +359,7 @@ async function refreshScenario() {
 // ------------------------------------------------------------------ render
 function render() {
   renderKpis($("#kpis"), state.plan, state.parent);
+  updateInterventionBadge();
   const n = state.plan ? Object.keys(state.plan.unplanned).length : 0;
   $("#t-conf").textContent = n ? String(n) : "";
   renderHistory($("#plan-history"), state, async (pid) => {
@@ -447,8 +473,47 @@ async function openVisit(vid) {
       },
     });
     $("#drawer").classList.remove("hidden");
+    if (state.plan.unplanned[vid]) loadVisitRecommendation(vid);
   } catch (e) {
     toast(e.message);
+  }
+}
+
+const LEVEL_SV = { within_rules: "inom reglerna", minor: "mindre avvikelse", major: "större avvikelse", not_permitted: "inte tillåtet", resource: "extra resurs" };
+
+async function loadVisitRecommendation(vid) {
+  const host = document.createElement("div");
+  host.id = "rec";
+  host.innerHTML = '<h4>Rekommenderad lösning</h4><p class="hint">Räknar fram lösningar för besöket… (omplanering av närmaste rutter + alla platser med avsteg)</p>';
+  const why = [...$("#drawer-body").querySelectorAll("h4")].find((h) => h.textContent.startsWith("Why unplanned"));
+  let anchor = why || $("#drawer-body").firstElementChild;
+  while (anchor?.nextElementSibling && anchor.nextElementSibling.tagName === "P") anchor = anchor.nextElementSibling;
+  anchor ? anchor.after(host) : $("#drawer-body").append(host);
+  try {
+    const pid = state.plan.id;
+    const d = await api("POST", `/api/plans/${pid}/visits/${vid}/suggestions`);
+    if (state.selectedVisit !== vid || state.plan?.id !== pid) return;
+    const [best, ...rest] = d.options;
+    const line = (o) => `${o.violations.length ? o.violations.map((x) => esc(x.text)).join(" · ") : "Inga regelbrott"}${o.pushed_visits?.length ? ` · flyttar ${esc(o.pushed_visits.join(", "))}` : ""}${o.kind === "replan" ? ` · ${o.changes} besök ändras i ${o.routes.length} rutter` : ""}`;
+    const label = (o) => o.kind === "pool" ? "Kalla in poolpersonal" : o.severity ? "Acceptera med avsteg" : "Acceptera";
+    host.innerHTML = !best ? `<h4>Rekommenderad lösning</h4><p class="hint">${d.window_closed ? `Inget förslag: besökets tidsfönster stängde kl. ${esc(d.window_closed)} och klockan är nu ${esc(d.clock)}.` : "Ingen lösning hittades."}</p>` : `
+      <h4>Rekommenderad lösning</h4>
+      <div class="card rec-best">
+        <div><span class="lvl ${best.level}">${LEVEL_SV[best.level] || best.level}</span> <span class="hint">${best.severity} poäng</span></div>
+        <div style="margin:6px 0"><b>${esc(best.title)}</b></div>
+        <div class="hint">${line(best)}</div>
+        ${best.level === "not_permitted" ? '<p class="hint">Inget tillåtet alternativ: alla lösningar bryter mot patientsäkerheten.</p>' : `<button class="primary" data-opt="${best.id}" style="margin-top:8px">${label(best)}</button>`}
+        ${best.severity && best.kind !== "pool" ? '<div class="hint" style="margin-top:6px">Avsteg registreras som godkänt undantag och fortsätter att rapporteras av validatorn.</div>' : ""}
+      </div>
+      ${rest.length ? `<h4>Andra alternativ</h4><div class="sugg">${rest.slice(0, 4).map((o) => `<div class="opt"><span class="lvl ${o.level}">${LEVEL_SV[o.level] || o.level}</span><span class="pts">${o.severity} p</span><b>${esc(o.title)}</b><span class="v">${line(o)}</span>${o.level === "not_permitted" ? '<span class="hint">kan inte accepteras (patientsäkerhet)</span>' : `<button data-opt="${o.id}">${label(o)}</button>`}</div>`).join("")}</div>` : ""}`;
+    host.querySelectorAll("button[data-opt]").forEach((b) => b.addEventListener("click", async () => {
+      const opt = d.options.find((o) => o.id === b.dataset.opt);
+      b.disabled = true;
+      $("#drawer").classList.add("hidden");
+      await conflictActions.apply(opt);
+    }));
+  } catch (err) {
+    host.innerHTML = `<h4>Rekommenderad lösning</h4><p class="hint">${esc(err.message)}</p>`;
   }
 }
 
@@ -627,6 +692,13 @@ function wire() {
       state.lastIncident = null;
       render();
       toast(res.valid ? "Plan optimised and independently validated: VALID" : "Plan produced but validation FAILED – see Score & validation");
+      // First optimisation of this day: let reality happen (3 real-time incidents, re-planned live).
+      if ($("#chk-auto-live").checked && !state.live.job && !state.autoLiveDone?.[state.scenario.id]) {
+        state.autoLiveDone = { ...(state.autoLiveDone || {}), [state.scenario.id]: true };
+        switchTab("live");
+        toast("Running 3 real-time incidents on the optimised day (alarm, sick child, delay, traffic …): follow them here.", 6000);
+        startLive({ events: 3, pace_s: 1.5, seed: Number($("#f-live [name=seed]").value) || 7 });
+      }
     } catch (err) {
       handleError(err);
     } finally {

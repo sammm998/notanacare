@@ -377,7 +377,7 @@ export function renderInterventionHead(el, d, hasPlan) {
       <div class="iv-status ${cls}" title="Oberoende validator">${s.valid ? (s.approved_exceptions ? "VALID*" : "VALID") : "INVALID"}</div></div>
     <div class="iv-cards">
       <div class="iv-card"><div class="k">Planerade insatser</div><div class="n">${fmtNum(s.interventions_assigned)}</div>
-        <div class="s">av ${fmtNum(s.interventions_total)} insatser (${pctTxt(s.interventions_assigned, s.interventions_total)}) · ${s.visits_planned}/${s.visits_total} besök</div></div>
+        <div class="s">av ${fmtNum(s.interventions_total)} insatser (${pctTxt(s.interventions_assigned, s.interventions_total)}) · ${s.visits_planned}/${s.visits_total} besök${s.clock ? `<br><b>${fmtNum(s.interventions_done)} utförda kl. ${esc(s.clock)}</b>${s.interventions_ongoing ? ` · ${fmtNum(s.interventions_ongoing)} pågår` : ""}` : ""}</div></div>
       <div class="iv-card"><div class="k">Oplanerade besök</div><div class="n ${s.visits_unplanned ? "bad" : ""}">${s.visits_unplanned}</div>
         <div class="s">Prioritetsvikt ${s.unplanned_priority_weight} · ${s.unplanned_high_priority} med prio 5</div></div>
       <div class="iv-card"><div class="k">Personal med godkänt schema</div><div class="n">${s.staff_compliant}/${s.staff_working}</div>
@@ -399,7 +399,7 @@ export function renderInterventionRows(el, rows, append, onVisit) {
       <td class="mono">${esc(r.window)}<br><span class="hint">${r.duration} min · ${esc(r.timing)}</span></td>
       <td>${r.requirements.length ? r.requirements.map((x) => `<span class="pill">${esc(x)}</span>`).join("") : "Grundkompetens"}</td>
       <td>${r.status === "assigned"
-        ? `<b>${r.staff.map((x) => esc(x.name)).join(" + ")}</b><br><span class="hint">${r.staff.map((x) => esc(x.id)).join(" + ")} · start ${esc(r.start)}</span>`
+        ? `<b>${r.staff.map((x) => esc(x.name)).join(" + ")}</b><br><span class="hint">${r.staff.map((x) => esc(x.id)).join(" + ")} · start ${esc(r.start)}${r.progress === "done" ? " · utförd" : r.progress === "ongoing" ? " · pågår" : ""}</span>`
         : r.status === "cancelled" ? '<span class="hint">Inställt</span>'
         : `<span class="unassigned">Utan tilldelning</span>${r.reason ? `<div class="why"><span class="code">${esc(r.reason.code)}</span> ${esc(r.reason.message)}</div>` : ""}`}</td>
     </tr>`).join("");

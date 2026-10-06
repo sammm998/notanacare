@@ -16,6 +16,7 @@
       <span id="b-scenario" class="badge muted">no scenario</span>
       <span id="b-travel" class="badge muted" title="Active travel-time source">travel: –</span>
       <span id="b-llm" class="badge muted" title="Optional planning advisor">advisor: –</span>
+      <span id="b-iv" class="badge iv hidden" title="Interventions planned / performed in the current plan"></span>
       <span id="b-valid" class="badge muted" title="Independent validator result">not validated</span>
       <span id="b-version" class="badge muted" title="Running version (git commit)">version: –</span>
       <a class="badge" href="/documentation" target="_blank" rel="noopener" title="How the system works: architecture, engine, rules, AI and machine learning">Documentation</a>
@@ -52,6 +53,7 @@
           <label>Strategy <select name="strategy" id="sel-strategy"></select></label>
           <label>Time limit (s) <input name="time_limit_s" type="number" value="25" min="2" max="300" /></label>
           <label>Approved overtime (min) <input name="max_overtime_min" type="number" value="0" min="0" max="120" /></label>
+          <label class="check" title="After the first optimisation of a day, three random (seeded) real-time incidents are run and re-planned automatically; follow them in the Live tab"><input type="checkbox" id="chk-auto-live" checked /> Run 3 real-time incidents automatically</label>
           <details class="sub"><summary>Objective weights</summary><div id="weights" class="weights"></div></details>
           <button type="submit" class="primary" disabled>Optimise</button>
         </form>

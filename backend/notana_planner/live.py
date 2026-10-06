@@ -126,20 +126,24 @@ def run_live(
             break
         if on_clock:
             on_clock(clock)
-        inc = None
-        for _ in range(4):
-            inc = make_event(rng, world, cur, clock)
-            if inc is not None:
-                break
-        if inc is None:
-            continue
-        t0 = time.perf_counter()
+        # Draw until an event applies (e.g. an alarm at a recipient whose visit is in
+        # progress is rejected), so the requested number of events really happens.
+        inc = effect = None
         before_unplanned = set(cur.unplanned)
-        try:
-            effect = apply_incident(world, cur, inc)
-        except ValueError as exc:  # e.g. medication visit already started
-            feed.append({"n": k + 1, "clock": clock, "kind": inc.kind, "label": LABELS.get(inc.kind, inc.kind),
-                         "title": f"skipped: {exc}", "skipped": True})
+        t0 = time.perf_counter()
+        for _ in range(12):
+            cand = make_event(rng, world, cur, clock)
+            if cand is None:
+                continue
+            try:
+                effect = apply_incident(world, cur, cand)
+                inc = cand
+                break
+            except ValueError:
+                continue
+        if inc is None or effect is None:
+            feed.append({"n": k + 1, "clock": clock, "kind": "none", "label": "No event",
+                         "title": "no applicable event at this time", "skipped": True})
             continue
         res = replan(world, cur, effect, fast_params(), "live")
         new = res.plan

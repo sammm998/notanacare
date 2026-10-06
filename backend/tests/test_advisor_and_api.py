@@ -104,3 +104,25 @@ def test_api_end_to_end(tmp_path, monkeypatch):
     assert client.post(f"/api/plans/{j2['result']['after_plan_id']}/validate").json()["valid"]
     bad = client.post(f"/api/scenarios/{sc['id']}/incidents", json={"kind": "meteor", "clock": 600})
     assert bad.status_code == 400
+
+
+def test_visit_recommendation_can_be_accepted():
+    from notana_planner import api
+
+    client = TestClient(api.app)
+    sc = client.post("/api/scenarios", json={"seed": 5, "target_interventions": 900, "employee_count": 12}).json()
+    j = _wait(client, client.post(f"/api/scenarios/{sc['id']}/plan", json={"time_limit_s": 4}).json()["job_id"])
+    pid = j["result"]["plan_id"]
+    plan = client.get(f"/api/plans/{pid}").json()
+    assert plan["unplanned"], "scenario should be understaffed"
+    vid = next(iter(plan["unplanned"]))
+    rec = client.post(f"/api/plans/{pid}/visits/{vid}/suggestions").json()
+    assert rec["visit_id"] == vid and rec["options"]
+    sev = [o["severity"] for o in rec["options"]]
+    assert sev == sorted(sev)
+    opt = next(o for o in rec["options"] if o["kind"] != "pool" and o["level"] != "not_permitted")
+    r = client.post(f"/api/plans/{pid}/suggestions/{opt['id']}/apply").json()
+    after = client.get(f"/api/plans/{r['plan_id']}").json()
+    assert vid in after["assignments"] and after["validation"]["valid"]
+    planned_vid = next(iter(plan["assignments"]))
+    assert client.post(f"/api/plans/{pid}/visits/{planned_vid}/suggestions").status_code in (400, 409)
