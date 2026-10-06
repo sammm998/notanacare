@@ -1,13 +1,15 @@
 import { api, runJob } from "./api.js";
 import { changedVisits, renderGantt } from "./gantt.js";
 import { initMap, invalidate, renderItinerary, renderMap, renderTeamLegend } from "./map.js";
-import { renderConflicts, renderExperiment, renderHistory, renderKpis, renderReplan, renderScore, renderVisit, renderWeek } from "./panels.js";
+import { renderConflicts, renderExperiment, renderHistory, renderKpis, renderLiveFeed, renderML, renderReplan, renderScore, renderVisit, renderWeek } from "./panels.js";
 import { $, $$, esc, hhmm, parseHHMM, toast } from "./util.js";
 
 const state = {
   meta: null, health: null, scenario: null, plan: null, parent: null, lastIncident: null,
   visitsById: {}, empsById: {}, tab: "map", selectedEmp: "", selectedVisit: null, mapMode: "employee",
   week: null, // week summary (week scenarios only)
+  suggestions: null, autofix: null, // unplanned-visit solutions for the current plan
+  live: { job: null, feed: [] },
 };
 
 // ------------------------------------------------------------------ boot
@@ -63,6 +65,110 @@ function indexScenario(sc) {
   $("#sel-team").innerHTML = '<option value="">all teams</option>' + sc.zones.map((z) => `<option>${esc(z)}</option>`).join("");
   $("#f-plan button").disabled = false;
   renderWeekBar();
+}
+
+// ------------------------------------------------------------------ unplanned solutions
+async function showPlan(pid) {
+  try {
+    await api("POST", `/api/plans/${pid}/activate`);
+    await refreshScenario();
+    await loadPlan(pid);
+    render();
+  } catch (err) {
+    toast(err.message);
+  }
+}
+
+const conflictActions = {
+  async suggest() {
+    try {
+      state.suggestions = await runJob(api("POST", `/api/plans/${state.plan.id}/suggestions`), "Finding solutions");
+      render();
+    } catch (err) {
+      toast(err.message, 8000);
+    }
+  },
+  async autofix() {
+    try {
+      const r = await runJob(api("POST", `/api/plans/${state.plan.id}/autofix`), "Auto-fix within rules");
+      state.autofix = r;
+      await refreshScenario();
+      await loadPlan(r.plan_id);
+      render();
+      toast(`${r.net_planned_gain} more visit(s) planned within the rules · ${r.unplanned_after} still unplanned`, 8000);
+    } catch (err) {
+      toast(err.message, 8000);
+    }
+  },
+  async apply(opt) {
+    try {
+      if (opt.kind === "pool") {
+        const clock = Math.max(opt.clock, (state.plan.clock ?? -1) + 1);
+        const res = await runJob(api("POST", `/api/scenarios/${state.scenario.id}/incidents`, {
+          kind: "extra_staff", clock, params: { count: 1, team: opt.team, lead_minutes: 30, delegations: opt.delegations, skills: opt.skills }, strategy: "baseline",
+        }), "Calling in pool staff");
+        state.lastIncident = res;
+        await refreshScenario();
+        await loadPlan(res.after_plan_id);
+        render();
+        toast(`Pool staff added in ${opt.team}: ${res.diff_counts.visits_changed} visits changed`);
+        return;
+      }
+      const r = await api("POST", `/api/plans/${state.plan.id}/suggestions/${opt.id}/apply`);
+      await refreshScenario();
+      await loadPlan(r.plan_id);
+      render();
+      toast(r.status === "VALID" ? "Applied within the rules: plan VALID" : r.valid ? "Applied as an approved exception (still reported by the validator)" : `Applied, but the plan is ${r.status}`, 8000);
+    } catch (err) {
+      toast(err.message, 8000);
+    }
+  },
+};
+
+// ------------------------------------------------------------------ live day
+async function startLive() {
+  const f = $("#f-live");
+  const body = { start: parseHHMM(f.start.value), end: parseHHMM(f.end.value), events: Number(f.events.value),
+    pace_s: Number(f.pace_s.value), seed: Number(f.seed.value) };
+  let job;
+  try {
+    job = await api("POST", `/api/scenarios/${state.scenario.id}/live`, body);
+  } catch (err) {
+    return toast(err.message, 8000);
+  }
+  state.live = { job: job.job_id, feed: [] };
+  $("#btn-live").disabled = true;
+  $("#btn-live-stop").disabled = false;
+  let shown = null;
+  try {
+    for (;;) {
+      await new Promise((r) => setTimeout(r, 800));
+      const j = await api("GET", `/api/jobs/${job.job_id}`);
+      if (j.clock != null) $("#live-clock").textContent = hhmm(j.clock);
+      state.live.feed = j.feed || [];
+      $("#t-live").textContent = state.live.feed.length ? String(state.live.feed.length) : "";
+      const last = state.live.feed[state.live.feed.length - 1];
+      $("#live-stats").textContent = last ? `${state.live.feed.length} events · ${last.unplanned_total} unplanned · ${Math.round(100 * last.interventions_planned_share * 10) / 10} % of interventions planned · last plan ${last.status}` : "running…";
+      if (j.latest_plan_id && j.latest_plan_id !== shown) {
+        shown = j.latest_plan_id;
+        await refreshScenario();
+        await loadPlan(shown);
+        render();
+      } else if (state.tab === "live") {
+        renderLiveFeed($("#live-feed"), state.live.feed, showPlan);
+      }
+      if (j.status === "done" || j.status === "error") {
+        if (j.status === "error") toast(j.error, 10000);
+        else toast(`Live day finished: ${j.result.events} events, ${j.result.unplanned} unplanned, plan ${j.result.valid ? "VALID" : "INVALID"}`, 8000);
+        break;
+      }
+    }
+  } finally {
+    state.live.job = null;
+    $("#btn-live").disabled = false;
+    $("#btn-live-stop").disabled = true;
+    render();
+  }
 }
 
 // ------------------------------------------------------------------ week
@@ -137,8 +243,12 @@ async function loadPlan(pid) {
   state.plan = await api("GET", `/api/plans/${pid}`);
   state.parent = state.plan.parent_plan_id ? await api("GET", `/api/plans/${state.plan.parent_plan_id}`) : null;
   const v = state.plan.validation;
-  setBadge("#b-valid", v.valid ? "VALID ✓ (independent validator)" : `INVALID · ${v.error_count} violations`, v.valid ? "ok" : "bad");
+  const nexc = v.approved_exceptions?.length || 0;
+  setBadge("#b-valid", v.valid ? (nexc ? `VALID · ${nexc} approved exception(s)` : "VALID ✓ (independent validator)") : `INVALID · ${v.error_count} violations`,
+    v.valid ? (nexc ? "warn" : "ok") : "bad");
   $("#f-incident button").disabled = false;
+  $("#btn-live").disabled = !!state.live.job;
+  if (state.suggestions && state.suggestions.plan_id !== state.plan.id) state.suggestions = null;
   if (state.plan.clock !== null && state.plan.clock !== undefined) {
     const cur = parseHHMM($("#f-incident [name=clock]").value);
     if (cur < state.plan.clock) $("#f-incident [name=clock]").value = hhmm(state.plan.clock + 5);
@@ -167,7 +277,13 @@ function render() {
   if (t === "timeline") renderGantt($("#gantt"), state, {
     team: $("#sel-team").value, sort: $("#sel-sort").value, onlyChanged: $("#chk-changed").checked, selectedVisit: state.selectedVisit,
   }, openVisit, selectEmployee);
-  if (t === "conflicts") renderConflicts($("#conflicts"), state, openVisit);
+  if (t === "conflicts") renderConflicts($("#conflicts"), state, openVisit, conflictActions);
+  if (t === "live") renderLiveFeed($("#live-feed"), state.live.feed, showPlan);
+  if (t === "ml") {
+    renderML($("#ml"), state.ml);
+    $("#btn-ml-cases").disabled = !state.plan;
+    api("GET", "/api/ml").then((d) => { state.ml = d; if (state.tab === "ml") renderML($("#ml"), d); }).catch((e) => toast(e.message));
+  }
   if (t === "replan") renderReplan($("#replan"), state, openVisit);
   if (t === "score") renderScore($("#score"), state.plan);
   if (t === "week") {
@@ -308,6 +424,14 @@ function renderIncidentFields(preVisit) {
     html = `<label>Count <input name="count" type="number" value="2" min="1" max="20" /></label>
       <label>Team <select name="team">${zones.map((z) => `<option>${esc(z)}</option>`).join("")}</select></label>
       <label>Ready after (min) <input name="lead_minutes" type="number" value="30" min="0" max="240" /></label>`;
+  } else if (kind === "child_sick") {
+    html = `<label>Employee <select name="employee_id">${employeeOptions(true)}</select></label>
+      <label>Away <select name="return_minutes"><option value="">rest of the day</option><option value="120">2 h, then back</option><option value="180">3 h, then back</option></select></label>`;
+  } else if (kind === "alarm") {
+    const rs = state.scenario?.recipients || [];
+    html = `<label>Recipient <select name="recipient_id"><option value="">random (no visit in progress)</option>${rs.map((r) => `<option value="${r.id}">${esc(r.id)} · ${esc(r.zone)}</option>`).join("")}</select></label>
+      <label>Duration (min) <input name="duration" type="number" value="20" min="5" max="90" /></label>
+      <label>Must be on site within (min) <input name="max_response_minutes" type="number" value="45" min="5" max="180" /></label>`;
   } else if (kind === "visit_cancelled") {
     const vs = (state.scenario?.visits || []).filter((v) => state.plan?.assignments[v.id] && state.plan.assignments[v.id].start > clock);
     html = `<label>Visit <select name="visit_id">${vs.map((v) => `<option value="${v.id}">${esc(v.id)} · ${esc(v.recipient_id)} · ${hhmm(state.plan.assignments[v.id].start)}</option>`).join("")}</select></label>`;
@@ -339,6 +463,20 @@ function incidentParams(form) {
   }
   if (kind === "extra_staff") return { count: Number(f("count").value), team: f("team").value, lead_minutes: Number(f("lead_minutes").value) };
   if (kind === "visit_cancelled") return { visit_id: f("visit_id").value };
+  if (kind === "child_sick") {
+    const back = f("return_minutes").value;
+    return { employee_id: f("employee_id").value, ...(back ? { return_minutes: Number(back) } : {}) };
+  }
+  if (kind === "alarm") {
+    let rid = f("recipient_id").value;
+    if (!rid) {
+      const clock = parseHHMM(form.clock.value);
+      const busy = new Set(Object.values(state.plan.assignments).filter((a) => a.start - 40 < clock && clock < a.end + 90).map((a) => state.visitsById[a.visit_id]?.recipient_id));
+      const free = (state.scenario.recipients || []).map((r) => r.id).filter((r) => !busy.has(r));
+      rid = free[Math.floor(Math.random() * free.length)];
+    }
+    return { recipient_id: rid, duration: Number(f("duration").value), max_response_minutes: Number(f("max_response_minutes").value) };
+  }
   return {};
 }
 
@@ -382,6 +520,26 @@ function wire() {
   });
 
   $("#btn-plan-week").addEventListener("click", planWeek);
+  $("#btn-ml-train").addEventListener("click", async () => {
+    try {
+      state.ml = await runJob(api("POST", "/api/ml/train"), "Training");
+      renderML($("#ml"), state.ml);
+    } catch (err) {
+      toast(err.message, 8000);
+    }
+  });
+  $("#btn-ml-cases").addEventListener("click", async () => {
+    const n = Number($("#ml-n").value) || 4;
+    try {
+      state.ml = await runJob(api("POST", `/api/scenarios/${state.scenario.id}/ml/cases?n=${n}&seed=${Date.now() % 100000}`), "Generating training cases");
+      renderML($("#ml"), state.ml);
+      toast(`${state.ml.added} new cases from this scenario; model retrained on ${state.ml.cases_total} cases`, 8000);
+    } catch (err) {
+      toast(err.message, 8000);
+    }
+  });
+  $("#f-live").addEventListener("submit", (e) => { e.preventDefault(); startLive(); });
+  $("#btn-live-stop").addEventListener("click", () => state.live.job && api("POST", `/api/jobs/${state.live.job}/cancel`).catch(() => {}));
   $("#f-plan").addEventListener("submit", async (e) => {
     e.preventDefault();
     const f = e.target;
@@ -390,6 +548,7 @@ function wire() {
     try {
       const res = await runJob(api("POST", `/api/scenarios/${state.scenario.id}/plan`, planBody()), "Optimising");
       await refreshScenario();
+      state.autofix = null;
       await loadPlan(res.plan_id);
       state.lastIncident = null;
       render();

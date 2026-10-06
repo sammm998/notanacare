@@ -39,6 +39,7 @@ def score_plan(
     )
 
     travel_min = 0
+    legs: list[int] = []  # travel into each visit
     travel_km = 0.0
     care_by_emp: dict[str, int] = {}
     idle_min = 0
@@ -58,9 +59,13 @@ def score_plan(
         loc = r.start_location_id or emp.start_location_id
         t_prev_end = r.route_start if r.route_start is not None else stops[0].start
         for s in stops:
-            t = etm.minutes(loc, s.location_id)
+            # An unavailability gap starts wherever the employee is (no travel into it).
+            t = 0 if s.kind == "unavailable" else etm.minutes(loc, s.location_id)
             travel_min += t
-            travel_km += travel.km(loc, s.location_id)
+            if s.kind != "unavailable":
+                travel_km += travel.km(loc, s.location_id)
+            if s.kind == "visit":
+                legs.append(t)
             idle_min += max(0, s.start - t_prev_end - t)
             loc = s.location_id
             t_prev_end = s.end
@@ -71,6 +76,11 @@ def score_plan(
             overtime += max(0, r.route_end - emp.shift_end)
             if r.route_start is not None:
                 span_min += r.route_end - r.route_start
+
+    # Interventions (the unit the user thinks in: ~5 000 per day)
+    active = [vid for vid, v in visits.items() if v.status.value != "cancelled"]
+    iv_total = sum(len(visits[v].intervention_ids) for v in active)
+    iv_planned = sum(len(visits[v].intervention_ids) for v in planned if v in visits)
 
     # Preferred-time deviation (per visit, lead start).
     devs = []
@@ -209,6 +219,14 @@ def score_plan(
         "travel_minutes": travel_min,
         "travel_km": round(travel_km, 1),
         "avg_travel_per_visit": round(travel_min / max(1, len(planned)), 1),
+        "median_leg_minutes": sorted(legs)[len(legs) // 2] if legs else 0,
+        "p90_leg_minutes": sorted(legs)[int(0.9 * len(legs))] if legs else 0,
+        "longest_leg_minutes": max(legs) if legs else 0,
+        "legs_over_20_min": sum(1 for t in legs if t > 20),
+        "interventions_total": iv_total,
+        "interventions_planned": iv_planned,
+        "interventions_unplanned": iv_total - iv_planned,
+        "interventions_planned_share": round(iv_planned / max(1, iv_total), 4),
         "preferred_time_deviation_total": pref_dev_total,
         "preferred_time_deviation_avg": round(pref_dev_total / max(1, len(planned)), 1),
         "preferred_time_deviation_max": max(devs) if devs else 0,

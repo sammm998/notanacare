@@ -25,6 +25,7 @@ STRATEGY_LABELS = {
     "enhanced": "B. + enhanced repair",
     "advisor": "C. + planning advisor",
     "classifier": "D. + classifier ranking",
+    "learned": "E. + learned selector (ML)",
 }
 
 
@@ -32,7 +33,7 @@ STRATEGY_LABELS = {
 class ExperimentSpec:
     config: ScenarioConfig
     incidents: list[Incident]
-    strategies: list[str] = field(default_factory=lambda: ["baseline", "enhanced", "advisor", "classifier"])
+    strategies: list[str] = field(default_factory=lambda: ["baseline", "enhanced", "advisor", "classifier", "learned"])
     base_time_limit_s: float = 25.0
     skip_llm_without_key: bool = False
 

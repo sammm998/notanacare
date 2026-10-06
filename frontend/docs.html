@@ -1,0 +1,466 @@
+<!doctype html>
+<html lang="sv">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Notana Care Planeringsmotor</title>
+<meta name="description" content="Hur systemet fungerar: arkitektur, planeringsmotor, regler, önskemål, Arbetstidslagen, vecka, förslag, live-dag, AI och maskininlärning." />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,500;6..72,600&family=Instrument+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" />
+<style>
+body { margin: 0; }
+
+/* Layout: two-column reference doc. A sticky table of contents on the left, one reading column on the right; one column on phones. */
+:root {
+  --bg: #f6f8f8;
+  --surface: #ffffff;
+  --fg: #17242a;
+  --muted: #5a6b72;
+  --line: #d9e2e4;
+  --accent: #0f7466;
+  --accent-soft: #e2f1ee;
+  --warn: #9a5b00;
+  --warn-soft: #fbf0dc;
+  --bad: #a3322b;
+  --code-bg: #eef3f3;
+  --f-display: "Newsreader", "Iowan Old Style", Georgia, serif;
+  --f-body: "Instrument Sans", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --f-mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0f1719; --surface: #152023; --fg: #e3ecee; --muted: #93a6ac; --line: #26363a;
+    --accent: #4cc3ae; --accent-soft: #163a35; --warn: #e2a94a; --warn-soft: #3a2c14; --bad: #ef7b72; --code-bg: #1a282b;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0f1719; --surface: #152023; --fg: #e3ecee; --muted: #93a6ac; --line: #26363a;
+  --accent: #4cc3ae; --accent-soft: #163a35; --warn: #e2a94a; --warn-soft: #3a2c14; --bad: #ef7b72; --code-bg: #1a282b;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--fg); font-family: var(--f-body); font-size: 16px; line-height: 1.6; }
+.wrap { max-width: 1180px; margin: 0 auto; padding-inline: 24px; padding-block: 40px 80px; display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 56px; }
+nav.toc { position: sticky; top: calc(env(safe-area-inset-top, 0px) + 24px); align-self: start; font-size: 14px; }
+nav.toc p { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 0 0 10px; }
+nav.toc ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; counter-reset: toc; }
+nav.toc li { counter-increment: toc; }
+nav.toc a { color: var(--fg); text-decoration: none; display: flex; gap: 8px; padding: 3px 0; }
+nav.toc a::before { content: counter(toc); font-family: var(--f-mono); font-size: 12px; color: var(--muted); width: 18px; padding-top: 2px; }
+nav.toc a:hover, nav.toc a:focus-visible { color: var(--accent); }
+main { min-width: 0; max-width: 760px; }
+header.doc { border-bottom: 1px solid var(--line); padding-bottom: 28px; margin-bottom: 8px; }
+.eyebrow { font-size: 12px; text-transform: uppercase; letter-spacing: .1em; color: var(--accent); font-weight: 600; margin: 0 0 8px; }
+h1, h2, h3 { font-family: var(--f-display); font-weight: 600; text-wrap: balance; line-height: 1.2; }
+h1 { font-size: clamp(32px, 5vw, 44px); margin: 0 0 14px; }
+h2 { font-size: 28px; margin: 56px 0 14px; scroll-margin-top: 24px; }
+h3 { font-size: 20px; margin: 30px 0 8px; }
+p, li { max-width: 68ch; }
+.lead { font-size: 18px; color: var(--muted); margin: 0; }
+a { color: var(--accent); }
+code, .mono { font-family: var(--f-mono); font-size: .86em; }
+code { background: var(--code-bg); padding: 1px 5px; border-radius: 4px; }
+.meta { display: flex; flex-wrap: wrap; gap: 8px 20px; margin-top: 18px; font-size: 13px; color: var(--muted); }
+.meta b { color: var(--fg); font-weight: 600; }
+.flow { display: flex; flex-wrap: wrap; align-items: stretch; gap: 8px; margin: 22px 0; }
+.flow div { flex: 1 1 120px; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; font-size: 13px; line-height: 1.4; }
+.flow div b { display: block; font-size: 14px; margin-bottom: 2px; }
+.flow span.arrow { align-self: center; color: var(--muted); font-family: var(--f-mono); }
+.figures { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; margin: 20px 0; }
+.figures div { background: var(--surface); padding: 14px 16px; }
+.figures .n { font-family: var(--f-display); font-size: 28px; font-variant-numeric: tabular-nums; line-height: 1.1; }
+.figures .l { font-size: 13px; color: var(--muted); }
+.tbl { overflow-x: auto; margin: 16px 0; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+table { border-collapse: collapse; width: 100%; font-size: 14px; }
+th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+tr:last-child td { border-bottom: 0; }
+th { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); font-weight: 600; background: var(--code-bg); }
+td.num { font-variant-numeric: tabular-nums; font-family: var(--f-mono); font-size: 13px; white-space: nowrap; }
+ol.steps { list-style: none; padding: 0; margin: 16px 0; display: grid; gap: 12px; counter-reset: st; }
+ol.steps li { counter-increment: st; display: grid; grid-template-columns: 34px minmax(0, 1fr); gap: 12px; max-width: none; }
+ol.steps li::before { content: counter(st); font-family: var(--f-mono); font-size: 13px; width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; background: var(--accent-soft); color: var(--accent); font-weight: 500; }
+ol.steps li div { min-width: 0; }
+ol.steps b { display: block; }
+.note { border: 1px solid var(--line); background: var(--surface); border-radius: 10px; padding: 14px 16px; margin: 18px 0; font-size: 15px; }
+.note.ai { border-color: var(--accent); background: var(--accent-soft); }
+.note.wip { border-color: var(--warn); background: var(--warn-soft); }
+.note p { margin: 0 0 6px; }
+.note p:last-child { margin: 0; }
+.pill { display: inline-block; font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; padding: 2px 8px; border-radius: 99px; background: var(--accent-soft); color: var(--accent); }
+.pill.warn { background: var(--warn-soft); color: var(--warn); }
+.pill.off { background: var(--code-bg); color: var(--muted); }
+pre { background: var(--code-bg); border-radius: 8px; padding: 14px 16px; overflow-x: auto; font-family: var(--f-mono); font-size: 13px; line-height: 1.55; }
+pre.mermaid { background: var(--surface); border: 1px solid var(--line); text-align: center; }
+.diagram { overflow-x: auto; }
+footer { margin-top: 64px; padding-top: 18px; border-top: 1px solid var(--line); font-size: 13px; color: var(--muted); }
+@media (max-width: 860px) {
+  .wrap { grid-template-columns: minmax(0, 1fr); gap: 24px; padding-inline: 16px; padding-block: 24px 60px; }
+  nav.toc { position: static; border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; background: var(--surface); }
+  nav.toc ol { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+}
+@media (prefers-reduced-motion: no-preference) { html { scroll-behavior: smooth; } }
+
+.arch { display: grid; gap: 10px; margin: 18px 0; }
+.arch .row { display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 10px; align-items: stretch; }
+.arch .lbl { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); padding-top: 10px; }
+.arch .boxes { display: flex; flex-wrap: wrap; gap: 8px; }
+.arch .b { flex: 1 1 140px; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; font-size: 13px; line-height: 1.35; min-width: 0; }
+.arch .b b { display: block; font-size: 13.5px; }
+.arch .b code { font-size: .8em; }
+.arch .b.key { border-color: var(--accent); background: var(--accent-soft); }
+.arch .b.ext { border-style: dashed; }
+.arch .down { text-align: center; color: var(--muted); font-family: var(--f-mono); font-size: 13px; }
+@media (max-width: 860px) { .arch .row { grid-template-columns: minmax(0, 1fr); } .arch .lbl { padding-top: 0; } }
+</style>
+</head>
+<body>
+<p style="max-width:1180px;margin:0 auto;padding:12px 24px 0;font-size:13px"><a href="/">← Tillbaka till planeringen</a></p>
+<div class="wrap">
+  <nav class="toc" aria-label="Innehåll">
+    <p>Innehåll</p>
+    <ol>
+      <li><a href="#oversikt">Översikt</a></li>
+      <li><a href="#arkitektur">Arkitektur</a></li>
+      <li><a href="#moduler">Alla moduler</a></li>
+      <li><a href="#insatser">Insatser blir besök</a></li>
+      <li><a href="#motorn">Planeringsmotorn</a></li>
+      <li><a href="#regler">Regler och mål</a></li>
+      <li><a href="#onskemal">Önskemål</a></li>
+      <li><a href="#atl">Arbetstidslagen</a></li>
+      <li><a href="#vecka">Veckoplanering</a></li>
+      <li><a href="#validator">Validatorn</a></li>
+      <li><a href="#oplanerade">Oplanerade besök</a></li>
+      <li><a href="#omplanering">Omplanering</a></li>
+      <li><a href="#live">Live-dag</a></li>
+      <li><a href="#ai">AI i systemet</a></li>
+      <li><a href="#ml">Maskininlärning</a></li>
+      <li><a href="#restid">Restider och karta</a></li>
+      <li><a href="#data">Testdata</a></li>
+      <li><a href="#api">API</a></li>
+      <li><a href="#drift">Drift</a></li>
+      <li><a href="#siffror">Uppmätta siffror</a></li>
+      <li><a href="#begransningar">Begränsningar</a></li>
+    </ol>
+  </nav>
+
+  <main>
+    <header class="doc">
+      <p class="eyebrow">Systemdokumentation · prototyp</p>
+      <h1>Notana Care Planeringsmotor</h1>
+      <p class="lead">Så planerar och omplanerar systemet en dag eller en vecka i hemtjänsten: från tusentals strukturerade insatser till körbara rutter för varje medarbetare, med Arbetstidslagen, kompetenser, delegeringar, personalens förutsättningar, brukarens önskemål, händelser i realtid och en modell som lär sig av simulerade fall.</p>
+      <div class="meta">
+        <span>Uppdaterad <b>2026-10-06</b></span>
+        <span>Kod <b>sammm998/notanacare</b></span>
+        <span>Sida i appen <b>/documentation</b></span>
+        <span>All data <b>syntetisk</b></span>
+      </div>
+    </header>
+
+    <h2 id="oversikt">Översikt</h2>
+    <p>Systemet löser <b>insatsplanering</b>: vilken medarbetare som gör vilket besök, i vilken ordning och vid vilken tid. Vilka pass medarbetarna jobbar (schemat) är indata.</p>
+    <div class="flow" role="list">
+      <div role="listitem"><b>Insatser</b>≈5 000 per dag, 4–10 min</div><span class="arrow">→</span>
+      <div role="listitem"><b>Besök</b>Grupperas per brukare och tid, ≈590</div><span class="arrow">→</span>
+      <div role="listitem"><b>Optimering</b>Konstruktion, LNS, OR-Tools, CP-SAT</div><span class="arrow">→</span>
+      <div role="listitem"><b>Kontroll</b>Oberoende validator</div><span class="arrow">→</span>
+      <div role="listitem"><b>Realtid</b>Larm, VAB, sjukdom, trafik</div>
+    </div>
+    <ul>
+      <li><b>Riktig optimering.</b> Ingenting är förinspelat. Varje plan räknas fram på det genererade problemet.</li>
+      <li><b>Oberoende kontroll.</b> En separat validator som inte delar kod med optimeraren godkänner eller underkänner varje plan.</li>
+      <li><b>Inget göms.</b> Ett besök som inte går att planera kortas aldrig och tas aldrig bort i tysthet. Det redovisas som oplanerat med skäl och förslag.</li>
+      <li><b>AI och ML väljer, motorn bestämmer.</b> Språkmodellen och ML-modellen får bara välja sökparametrar. De kan aldrig göra en plan giltig.</li>
+    </ul>
+
+    <h2 id="arkitektur">Arkitektur</h2>
+    <p>En Python-tjänst (FastAPI) innehåller allt: generering, optimering, validering, omplanering, förslag, live-simulering, maskininlärning och API. Webbgränssnittet är JavaScript-moduler utan byggsteg. Tunga jobb körs som bakgrundsjobb som webbläsaren följer.</p>
+    <div class="arch" aria-label="Arkitekturskiss">
+      <div class="row"><div class="lbl">Gränssnitt</div><div class="boxes">
+        <div class="b"><b>Webbläsare</b>Karta, tidslinje, oplanerade och förslag, omplanering, live, vecka, ML, experiment</div>
+        <div class="b ext"><b>Google Maps JS</b>valfri kartbakgrund, annars OpenStreetMap</div>
+      </div></div>
+      <div class="down">↓ REST + bakgrundsjobb</div>
+      <div class="row"><div class="lbl">API</div><div class="boxes">
+        <div class="b"><b>FastAPI</b><code>api.py</code>: sessioner i minnet, jobbkö, SQLite-revisionsspår</div>
+      </div></div>
+      <div class="down">↓</div>
+      <div class="row"><div class="lbl">Tjänster</div><div class="boxes">
+        <div class="b"><b>Generator</b>brukare, insatser, personal, scheman, önskemål</div>
+        <div class="b key"><b>Planeringsmotor</b>konstruktion → LNS → OR-Tools → CP-SAT</div>
+        <div class="b"><b>Omplanering</b>fas 1 → 2 → 3, låsning av det som har startat</div>
+        <div class="b"><b>Förslag</b>inom reglerna, med avsteg, extra resurs</div>
+        <div class="b"><b>Live-dag</b>klocka och slumpade händelser</div>
+        <div class="b"><b>Vecka</b>mån → sön, dygns- och veckovila</div>
+        <div class="b key"><b>Maskininlärning</b>strategiväljare tränad på simulerade fall</div>
+      </div></div>
+      <div class="down">↓ varje plan</div>
+      <div class="row"><div class="lbl">Kontroll</div><div class="boxes">
+        <div class="b key"><b>Oberoende validator</b>importerar inget från optimeraren</div>
+        <div class="b"><b>Diagnostik och poäng</b>varför oplanerat, alla målfunktionstermer</div>
+      </div></div>
+      <div class="down">↕</div>
+      <div class="row"><div class="lbl">Externt</div><div class="boxes">
+        <div class="b ext"><b>Google Routes API</b>valfria restider, cachade</div>
+        <div class="b ext"><b>Claude</b>valfri rådgivare (strategi C)</div>
+      </div></div>
+    </div>
+
+    <h2 id="moduler">Alla moduler</h2>
+    <div class="tbl"><table>
+      <thead><tr><th>Fil</th><th>Ansvar</th></tr></thead>
+      <tbody>
+        <tr><td><code>domain.py</code></td><td>Datamodellen: brukare, insats, besök, medarbetare, plan, rutt, regler, godkända avsteg</td></tr>
+        <tr><td><code>catalog.py</code></td><td>33 insatstyper (inkl. larmbesök), kompetenser, delegeringar, språk, intim omvårdnad</td></tr>
+        <tr><td><code>generator.py</code></td><td>Deterministisk testdata från ett seed: dag eller vecka, passmallar, scheman, önskemål</td></tr>
+        <tr><td><code>visit_builder.py</code></td><td>Insatser → besök</td></tr>
+        <tr><td><code>travel/</code></td><td>Restider: syntetiska eller Google Routes, trafikfaktorer, egen matris för cykel</td></tr>
+        <tr><td><code>solver/construction.py</code></td><td>Exakt insättning, par för dubbelbemanning</td></tr>
+        <tr><td><code>solver/ruin_recreate.py</code></td><td>Ruin-and-recreate LNS, huvudförbättringen</td></tr>
+        <tr><td><code>solver/routing_solver.py</code></td><td>OR-Tools-modellen</td></tr>
+        <tr><td><code>solver/timetabling.py</code></td><td>CP-SAT: exakta tider, synk av dubbelbesök, brukarens icke-överlapp</td></tr>
+        <tr><td><code>solver/lns.py</code></td><td>Ejection chains (strategi B)</td></tr>
+        <tr><td><code>solver/engine.py</code></td><td>Kopplar ihop stegen</td></tr>
+        <tr><td><code>working_time.py</code></td><td>Arbetstidslagen som gränser per medarbetare</td></tr>
+        <tr><td><code>validator.py</code></td><td>Oberoende kontroll av alla hårda regler</td></tr>
+        <tr><td><code>diagnostics.py</code>, <code>scoring.py</code>, <code>explain.py</code></td><td>Skäl för oplanerade, poäng och mått, förklaringar och diff</td></tr>
+        <tr><td><code>incidents.py</code>, <code>replanning.py</code></td><td>Händelser (inkl. larm och VAB) och fasad omplanering</td></tr>
+        <tr><td><code>suggestions.py</code></td><td>Lösningar för oplanerade besök, godkända avsteg, autofix</td></tr>
+        <tr><td><code>live.py</code></td><td>Live-dag med slumpade händelser</td></tr>
+        <tr><td><code>week.py</code></td><td>Veckoplanering och veckovalidator</td></tr>
+        <tr><td><code>ml/</code></td><td>Fall, egenskaper, träning, utvärdering och prediktion</td></tr>
+        <tr><td><code>advisor/</code>, <code>classifier/</code></td><td>Claude-rådgivare med deterministisk reserv, mock-klassificerare</td></tr>
+        <tr><td><code>experiments.py</code></td><td>Strategi A–E på samma scenario, uppmätt jämförelse</td></tr>
+        <tr><td><code>api.py</code>, <code>store.py</code></td><td>REST-API, jobb, sessioner, SQLite</td></tr>
+        <tr><td><code>frontend/</code></td><td>Gränssnittet, inklusive den här sidan</td></tr>
+      </tbody>
+    </table></div>
+
+    <h2 id="insatser">Från insatser till besök</h2>
+    <p>En <b>insats</b> är en enskild beviljad åtgärd: läkemedel, dusch, frukost med mera. Den har längd, önskad tid, tidsfönster (mjukt eller hårt), prioritet och eventuella krav. Insatser hos samma brukare vid ungefär samma tid slås ihop till ett <b>besök</b>:</p>
+    <div class="tbl"><table>
+      <thead><tr><th>Regel</th><th>Värde</th></tr></thead>
+      <tbody>
+        <tr><td>Samma besök om önskade tider ligger nära</td><td class="num">≤ 45 min</td></tr>
+        <tr><td>Max insatser / max längd per besök</td><td class="num">12 / 130 min</td></tr>
+        <tr><td>Besökets längd</td><td>Summan av insatsernas längder</td></tr>
+        <tr><td>Tidsfönster</td><td>Snittet av insatsernas fönster</td></tr>
+        <tr><td>Dubbelbemanning</td><td>Två personer om någon insats kräver det</td></tr>
+        <tr><td>Kompetens / delegering</td><td>Kompetens krävs av alla, delegering av den som leder</td></tr>
+        <tr><td>Intim omvårdnad</td><td>Hygien, dusch, toalett, av-/påklädning, kateter, mun- och hudvård, sänggående</td></tr>
+      </tbody>
+    </table></div>
+    <p>Gränssnittet visar resultatet på <b>insatsnivå</b>: antal och andel av insatserna som är planerade och oplanerade.</p>
+
+    <h2 id="motorn">Planeringsmotorn steg för steg</h2>
+    <p>Samma pipeline används för hela dagen, för varje omplaneringsfas, för förslag och för varje dag i en vecka. Medarbetarna är "fordon" med egen start, eget slut, egna raster och egen restidsmatris (bil eller cykel). Varje besöksroll är en nod.</p>
+    <ol class="steps">
+      <li><div><b>Konstruktion</b>Exakt insättning med fönster, restid och raster. Dubbelbesök sätts in som par med samma starttid.</div></li>
+      <li><div><b>Ruin-and-recreate LNS</b> <span class="pill">75 % av tiden</span> Ett geografiskt kluster, en sträng ur en rutt eller besöken med längst resor rivs upp och sätts in igen, med samma exakta kontroller. Ändringen behålls om kostnaden blir lägre. Kostnaden består av oplanerade besök, restid, långa resor (150 poäng per minut över 15 min), kontinuitet, önskemål och område. Här kommer den stora förbättringen ifrån.</div></li>
+      <li><div><b>OR-Tools routing</b>Guided local search, varmstartad från LNS-resultatet. På hela dagen hittar den sällan något bättre: uppmätt till cirka 15 drag per sekund och noll förbättringar på 25 s. Därför har den fått resten av tiden.</div></li>
+      <li><div><b>Reparation</b>Kvarvarande besök prövas igen. Strategi B lägger till ejection chains.</div></li>
+      <li><div><b>CP-SAT tidsättning</b>Exakta starttider för alla besök och raster, synk mellan rutter, ingen dubbelbokning av brukare, minsta avvikelse från önskad tid.</div></li>
+      <li><div><b>Luckfyllnad och kontroll</b>Validator, diagnostik och poängsättning.</div></li>
+    </ol>
+
+    <h2 id="regler">Hårda regler och mjuka mål</h2>
+    <p>Hårda regler är villkor i modellen. Det enda stora straffet gäller att lämna ett besök oplanerat, och det redovisas då.</p>
+    <div class="tbl"><table>
+      <thead><tr><th>Hård regel</th><th>Validatorns kod</th></tr></thead>
+      <tbody>
+        <tr><td>Inom pass (+ godkänd övertid), ingen överlappning, restid räcker, hela besökstiden reserverad</td><td><code>OUTSIDE_SHIFT</code>, <code>OVERLAP</code>, <code>TRAVEL_INFEASIBLE</code>, <code>DURATION_NOT_RESERVED</code></td></tr>
+        <tr><td>Kompetens (alla), delegering (den som leder), undvikna medarbetare</td><td><code>MISSING_SKILL</code>, <code>MISSING_DELEGATION</code>, <code>AVOIDED_EMPLOYEE</code></td></tr>
+        <tr><td>Hårda tidsfönster</td><td><code>TIME_WINDOW_VIOLATED</code></td></tr>
+        <tr><td>Dubbelbemanning: två olika personer, samtidigt</td><td><code>WRONG_STAFF_COUNT</code>, <code>DOUBLE_STAFFING_NOT_SYNCHRONISED</code></td></tr>
+        <tr><td>Raster och otillgänglig tid</td><td><code>BREAK_MISSING</code>, <code>DURING_UNAVAILABILITY</code></td></tr>
+        <tr><td>Strikt krav på kön, allergi, rökfri miljö, språk</td><td><code>GENDER_REQUIREMENT_VIOLATED</code>, <code>PET_ALLERGY</code>, <code>SMOKING_EXPOSURE</code>, <code>LANGUAGE_REQUIRED</code></td></tr>
+        <tr><td>Arbetstidslagen</td><td><code>ATL_CONTINUOUS_WORK</code>, <code>MAX_DAILY_WORK</code>, <code>DAILY_REST_VIOLATED</code></td></tr>
+        <tr><td>Startade och låsta besök flyttas aldrig. Brukaren dubbelbokas aldrig. Inget besök försvinner.</td><td><code>LOCKED_VISIT_MOVED</code>, <code>RECIPIENT_DOUBLE_BOOKED</code>, <code>VISIT_MISSING</code></td></tr>
+      </tbody>
+    </table></div>
+    <div class="tbl"><table>
+      <thead><tr><th>Mjukt mål</th><th>Vikt (poäng)</th></tr></thead>
+      <tbody>
+        <tr><td>Oplanerat besök × (1 + 0,6 × (prioritet − 1))</td><td class="num">200 000</td></tr>
+        <tr><td>Restid per minut / per km</td><td class="num">20 / 2</td></tr>
+        <tr><td>Lång resa: per minut över 15 min</td><td class="num">150</td></tr>
+        <tr><td>Besök utanför eget teams område / utanför önskat område</td><td class="num">60 / 40</td></tr>
+        <tr><td>Avvikelse från önskad tid, per minut</td><td class="num">3</td></tr>
+        <tr><td>Okänd personal / föredragen personal används inte</td><td class="num">150 / 120</td></tr>
+        <tr><td>Önskemål om kön / språk inte uppfyllt</td><td class="num">500 / 250</td></tr>
+        <tr><td>Övertid per minut</td><td class="num">400</td></tr>
+        <tr><td>Omplanering: byte av medarbetare / per minut från kommunicerad tid / tappat kommunicerat besök</td><td class="num">900 / 12 / 150 000</td></tr>
+      </tbody>
+    </table></div>
+
+    <h2 id="onskemal">Önskemål och personliga förutsättningar</h2>
+    <div class="tbl"><table>
+      <thead><tr><th>Vem</th><th>Egenskap</th><th>Regel</th></tr></thead>
+      <tbody>
+        <tr><td>Brukare</td><td>Kvinnlig eller manlig personal, vid intim omvårdnad eller alla besök (22 %, varav 40 % strikt)</td><td>Strikt = krav, annars önskemål</td></tr>
+        <tr><td>Brukare</td><td>Modersmål: finska, arabiska, persiska, somaliska, BKS, spanska, polska (≈ 10 %)</td><td>Krav för den som leder (ofta vid demens), annars önskemål</td></tr>
+        <tr><td>Brukare</td><td>Hund eller katt (25 %), röker (8 %)</td><td>Ingen allergisk personal och ingen med krav på rökfri miljö</td></tr>
+        <tr><td>Medarbetare</td><td>Kön (80 % kvinnor), språk, allergi, rökfri miljö, cykel (12 %), önskat område</td><td>Cykel har egen restidsmatris (×1,35)</td></tr>
+      </tbody>
+    </table></div>
+
+    <h2 id="atl">Arbetstidslagen</h2>
+    <div class="tbl"><table>
+      <thead><tr><th>Regel</th><th>Gräns</th><th>Så upprätthålls den</th></tr></thead>
+      <tbody>
+        <tr><td>Rast senast efter 5 h (15 §)</td><td class="num">≤ 5 h</td><td>Rastfönster snävas in, övertid begränsas. Om resan till kontoret skulle bryta mot regeln tas rasten på plats.</td></tr>
+        <tr><td>Max arbetstid per dag</td><td class="num">≤ 10 h</td><td>Senaste sluttid per medarbetare</td></tr>
+        <tr><td>Dygnsvila (13 §)</td><td class="num">≥ 11 h</td><td>Dagens spann. I veckoläget: kvällens slut ≤ morgondagens start − 11 h.</td></tr>
+        <tr><td>Veckovila (14 §)</td><td class="num">≥ 36 h</td><td>Två lediga dagar i följd. Kontrolleras även över veckoskiftet.</td></tr>
+        <tr><td>Veckoarbetstid</td><td class="num">≤ avtal + 5 h</td><td>Kontrolleras från planerna</td></tr>
+      </tbody>
+    </table></div>
+    <p>Passmallar: tidigt 06:30–15:00 och sent 13:30–22:15 med 30 min rast, delad tur 07:30–12:00 + 16:30–20:30, deltid 07:00–11:30 eller 17:15–22:15. Validatorn hämtar vilan både från rutten och från medarbetarens schema. Ett uppehåll i delad tur räknas alltså som vila även om en omplanering startade mitt i det.</p>
+
+    <h2 id="vecka">Veckoplanering</h2>
+    <p>Med <i>Horisont: en vecka</i> skapas måndag till söndag med 140 anställda, varav 100 i tjänst per dag. Alla har samma passtyp hela veckan och två lediga dagar i följd, jämnt fördelade per passtyp och team. Dusch, städning, tvätt, inköp och promenader följer veckofrekvenser. Dagarna optimeras i ordning, och den som besökt en brukare räknas som känd de följande dagarna. Veckovalidatorn kontrollerar dygnsvila, veckovila och veckotimmar från planerna.</p>
+
+    <h2 id="validator">Den oberoende validatorn</h2>
+    <p><code>validator.py</code> läser bara scenariot, restidsmatrisen och planen. Den kontrollerar varje hård regel, räknar om alla restider och kontrollerar att inget besök saknas. Sidhuvudet visar <b>VALID</b>, <b>VALID · N approved exceptions</b> eller <b>INVALID</b>. Under utvecklingen har validatorn hittat riktiga fel i optimeraren. Två exempel: en gammal position som användes efter en försening, och varmstartsrutter som var omöjliga efter ett uppehåll. Båda är rättade och har tester.</p>
+
+    <h2 id="oplanerade">Oplanerade besök: lösningar</h2>
+    <p>Fliken <b>Unplanned</b> visar hur många insatser som är planerade (antal och procent). Med <b>Find solutions</b> får varje oplanerat besök alternativ, sorterade efter allvarlighetsgrad med de minst allvarliga först:</p>
+    <div class="tbl"><table>
+      <thead><tr><th>Typ</th><th>Vad som görs</th><th>Poäng</th></tr></thead>
+      <tbody>
+        <tr><td><span class="pill">inom reglerna</span></td><td>En riktig omoptimering av de 5–6 närmaste behöriga rutterna tillsammans. Godkänns bara om besöket planeras, inget annat tappas och validatorn säger giltig.</td><td class="num">0</td></tr>
+        <tr><td><span class="pill warn">avsteg</span></td><td>Besöket prövas på varje plats i varje rutt, och följande stopp skjuts fram. Varje följd prissätts: utanför fönster (1/min, 8/min om tidskritiskt), framskjutna besök, övertid (2/min), flyttad rast (2/min), över 5 h utan rast (4/min), osynkat dubbelbesök (300), önskemål (10–400), allergi (800), saknad kompetens (600), saknad delegering (2000, <i>inte tillåtet</i>), ensambemanning av dubbelbesök (1500).</td><td class="num">1–…</td></tr>
+        <tr><td><span class="pill off">resurs</span></td><td>Poolpersonal med besökets kompetenser och delegeringar, för området och tiden</td><td class="num">150</td></tr>
+      </tbody>
+    </table></div>
+    <p>Att tillämpa ett avsteg skapar en plan med ett <b>godkänt avsteg</b>. Validatorn fortsätter att rapportera varje avvikelse, men som godkänd. Utan godkännandet är samma plan ogiltig. <b>Auto-fix within rules</b> omoptimerar först alla öppna besök med varmstart och planerar sedan om de närmaste rutterna per kvarvarande besök. Den redovisar nettot: hur många fler besök som blev planerade.</p>
+
+    <h2 id="omplanering">Omplanering i realtid</h2>
+    <p>Allt som har startat enligt klockan fryses. Därefter körs fas 1 (de drabbade plus 6 hjälpare med flest luckor, 3 h), fas 2 (24 hjälpare, resten av dagen) och fas 3 (alla). En fas godkänns om inget kommunicerat besök tappas och planen är giltig. Annars väljs den bästa fasen. Tidigare oplanerade besök är med i varje fas, så tid som frigörs kan användas. Rapporten skrivs från fakta och säger vilken fas som användes.</p>
+
+    <h2 id="live">Live-dag och nya händelser</h2>
+    <p>Fliken <b>Live</b> kör klockan genom dagen. Händelserna kommer på slumpade (men reproducerbara) tider och planeras om direkt på 3–5 s. Varje händelse visas i ett flöde: vem som skickades och hur snabbt, vad som ändrades, vad som blev oplanerat och bästa förslaget.</p>
+    <div class="tbl"><table>
+      <thead><tr><th>Händelse</th><th>Så hanteras den</th></tr></thead>
+      <tbody>
+        <tr><td><b>Trygghetslarm</b></td><td>Ett nytt akut besök. Den som kan vara på plats först skickas, räknat på var hen är och när pågående besök är klart. Sjuka, VAB och de som har uppehåll hoppas över. Hens övriga besök planeras om. Går dagen inte ihop prövas nästa snabbaste. Har brukaren redan ett pågående besök sköter personalen på plats larmet.</td></tr>
+        <tr><td><b>Sjukt barn (VAB)</b></td><td>Medarbetaren gör klart pågående besök och åker sedan, för resten av dagen eller 2–3 h. Hens besök planeras om.</td></tr>
+        <tr><td>Sjukdom, försening, trafik, inställt besök, flyttad medicin, poolpersonal</td><td>Som tidigare, med fasad lokal omplanering</td></tr>
+      </tbody>
+    </table></div>
+
+    <h2 id="ai">AI i systemet</h2>
+    <div class="note ai"><p><b>Själva planeringen görs av matematisk optimering</b> (konstruktion, LNS, OR-Tools och CP-SAT), inte av en språkmodell. Samma indata ger samma typ av plan, och varje beslut går att spåra till ett villkor eller en vikt.</p></div>
+    <div class="tbl"><table>
+      <thead><tr><th>Strategi</th><th>Vad som väljer omplaneringens sökparametrar</th></tr></thead>
+      <tbody>
+        <tr><td>A · Bas</td><td>Fast regel: lokal reparation, eskalera vid behov</td></tr>
+        <tr><td>B · Utökad reparation</td><td>Som A, plus ejection chains</td></tr>
+        <tr><td>C · Rådgivare</td><td>Claude (<code>claude-opus-5-5</code>) när <code>ANTHROPIC_API_KEY</code> finns, med JSON-schema och säkra gränser. Claude får strukturerade fakta och de mest lika tidigare fallen med uppmätta utfall. Utan nyckel används en deterministisk, fallbaserad reserv. Claude avgör aldrig om en plan är giltig.</td></tr>
+        <tr><td>D · Klassificerare</td><td>Genomskinlig mock som rangordnar redan validerade alternativ. Det finns ingen verifierad JEV-SDK.</td></tr>
+        <tr><td>E · Inlärd</td><td>ML-modellen nedan</td></tr>
+      </tbody>
+    </table></div>
+
+    <h2 id="ml">Maskininlärning</h2>
+    <p>Systemet lär sig <b>vilken omplaneringsstrategi som fungerar bäst för en viss händelse</b>. Det är det beslut där en fast regel oftast blir fel, och där resultatet går att mäta exakt.</p>
+    <ol class="steps">
+      <li><div><b>Fall</b>En simulerad händelse på en planerad dag: larm, VAB, försening, trafik, sjukdom, inställt besök eller flyttad medicin. Händelserna slumpas på olika scenarier, storlekar och tider.</div></li>
+      <li><div><b>Kontrafaktisk mätning</b>Alla fyra strategier körs på <i>exakt samma</i> fall: lokal eskalering, lokal + ejection chains, utökat grannskap och bred omoptimering. Varje utfall mäts med poäng: 1000 × tappade högprioriterade + 100 × tappade + 20 × extra oplanerade + ändrade besök + 0,5 × sekunder. En ogiltig plan ger ett mycket högt straff.</div></li>
+      <li><div><b>Egenskaper</b>Det modellen ser innan något planeras: typ av händelse, klockslag, antal frigjorda besök (högprioriterade, dubbelbemannade, hårda fönster, vårdminuter), antal drabbade medarbetare, kvarvarande vård kontra kvarvarande personaltid (belastning), oplanerade före, trafik och antal områden.</div></li>
+      <li><div><b>Modell</b>En gradient boosting-regressor (scikit-learn) per strategi förutsäger poängen. Strategi E väljer lägst förutsagd poäng. Modellen tränas om från falldatan när tjänsten startar och på begäran, så ingen binärfil behöver matcha en biblioteksversion.</div></li>
+      <li><div><b>Utvärdering</b>5-faldig korsvalidering: modellen poängsätts bara på fall den inte tränats på. Den jämförs med att alltid välja standardstrategin och med facit (det bästa uppmätta valet per fall). Resultatet visas i fliken <b>Machine learning</b>, även när modellen inte är bättre.</div></li>
+      <li><div><b>Fortsatt träning</b>I appen kan man generera nya fall på det egna scenariot. Varje strategi körs då på en kopia av världen, så sessionen påverkas inte. Fallen läggs till och modellen tränas om. Claude-rådgivaren och dess deterministiska reserv använder samma fallbas.</div></li>
+    </ol>
+    <p><b>Uppmätt resultat (ärligt):</b> 96 simulerade fall från 16 scenarier, utvärderade med nästlad 5-faldig korsvalidering. Den inlärda strategiväljaren fick medelpoäng 375, standardstrategin 365 och bästa möjliga 354. Med den här datamängden slår modellen alltså <b>inte</b> standardvalet, som redan ligger inom 3 % från bästa möjliga. Modellen valde annat än standardvalet i 28 av 96 fall: bättre i 10, sämre i 12. Mekanismen fungerar och mäts ärligt, men det behövs fler och mer varierade fall, och helst riktiga utfall. Det går att generera fler fall i appen. Strategi E finns med i experimentet så att effekten kan följas, och utan tränad modell används standardvalet.</p>
+
+    <h2 id="restid">Restider och karta</h2>
+    <p>Optimeraren läser en förberäknad matris med trafikfaktorer ovanpå. Matrisen är antingen syntetisk (fågelvägen × 1,35 i 24 km/h + 3 min) eller hämtad från Google Routes API (<code>computeRouteMatrix</code>, trafikmedveten och cachad). Cykel har ×1,35. Kartan använder Google Maps JS med en egen webbläsarnyckel, med reserv till OpenStreetMap. Linjen längs vägarna hämtas från <code>computeRoutes</code> och används bara för visning.</p>
+
+    <h2 id="data">Testdata</h2>
+    <p>All data är syntetisk och deterministisk från ett seed. Standard: Stockholm, seed 42, 5 000 insatser, 100 medarbetare och bemanningstryck 0,15. Ett mindre scenario med fler insatser per medarbetare, till exempel 1 500 insatser och 24 medarbetare, ger en underbemannad dag där cirka 70–80 % av insatserna går att planera. Det är bra för att visa förslagen.</p>
+
+    <h2 id="api">API (urval)</h2>
+    <div class="tbl"><table>
+      <tbody>
+        <tr><td><code>POST /api/scenarios</code></td><td>Generera dag eller vecka (<code>days</code>)</td></tr>
+        <tr><td><code>POST /api/scenarios/{id}/plan</code> · <code>POST /api/weeks/{id}/plan</code></td><td>Optimera dag eller vecka (jobb)</td></tr>
+        <tr><td><code>POST /api/scenarios/{id}/incidents</code></td><td>Händelse + omplanering (jobb), inklusive <code>alarm</code> och <code>child_sick</code></td></tr>
+        <tr><td><code>POST /api/plans/{id}/suggestions</code> · <code>…/suggestions/{option}/apply</code> · <code>POST /api/plans/{id}/autofix</code></td><td>Lösningar för oplanerade besök</td></tr>
+        <tr><td><code>POST /api/scenarios/{id}/live</code> · <code>POST /api/jobs/{id}/cancel</code></td><td>Live-dag (flödet finns i jobbet)</td></tr>
+        <tr><td><code>GET /api/ml</code> · <code>POST /api/ml/train</code> · <code>POST /api/scenarios/{id}/ml/cases</code></td><td>Maskininlärning: status, träning, nya fall</td></tr>
+        <tr><td><code>POST /api/experiments</code></td><td>Strategi A–E på samma fall</td></tr>
+        <tr><td><code>/docs</code> · <code>/documentation</code></td><td>OpenAPI · den här sidan</td></tr>
+      </tbody>
+    </table></div>
+
+    <h2 id="drift">Drift och säkerhet</h2>
+    <ul>
+      <li><b>Railway</b> bygger <code>Dockerfile</code> från <code>main</code>. En process med avsikt, eftersom sessionerna ligger i minnet.</li>
+      <li><b>SQLite</b> sparar revisionsspåret. ML-fall från appen sparas i <code>data/ml_cases.jsonl</code>. På Railway försvinner disken vid omstart om ingen volym är kopplad, men de medföljande fallen finns alltid kvar.</li>
+      <li><b>Nycklar</b> (<code>ANTHROPIC_API_KEY</code>, <code>GOOGLE_MAPS_API_KEY</code>, <code>GOOGLE_MAPS_BROWSER_KEY</code>) sätts som miljövariabler och committas aldrig.</li>
+      <li>Rekommenderat: minst 2 vCPU och 2–4 GB RAM. Det finns ingen inloggning, så lägg tjänsten bakom egen åtkomstkontroll.</li>
+    </ul>
+
+    <h2 id="siffror">Uppmätta siffror</h2>
+    <p>Mätt på standardscenariot (Stockholm, syntetiska restider, 25 s per dag, bemanningstryck 0,15, önskemål och Arbetstidslagen påslagna). Körningarna gick parallellt på 4 kärnor, så siffrorna är snarare i underkant.</p>
+    <h3>En dag (≈5 000 insatser, 100 medarbetare)</h3>
+    <div class="figures">
+      <div><div class="n">98,7 %</div><div class="l">av 5 002 insatser planerade (seed 42)</div></div>
+      <div><div class="n">579 / 587</div><div class="l">besök, giltig plan</div></div>
+      <div><div class="n">7 min</div><div class="l">medianresa mellan besök</div></div>
+      <div><div class="n">≤ 15 min</div><div class="l">för 90 % av resorna</div></div>
+      <div><div class="n">12,4 min</div><div class="l">restid per besök</div></div>
+      <div><div class="n">≈ 26 s</div><div class="l">optimering + validering</div></div>
+    </div>
+    <div class="tbl"><table>
+      <thead><tr><th>Seed</th><th class="num">Insatser planerade</th><th class="num">Oplanerade besök</th><th class="num">Resa / besök</th><th class="num">90 % av resorna ≤</th><th class="num">Längsta resa</th><th>Validator</th></tr></thead>
+      <tbody>
+        <tr><td>42</td><td class="num">4 935 / 5 002 (98,7 %)</td><td class="num">8</td><td class="num">12,4</td><td class="num">15</td><td class="num">44</td><td>VALID</td></tr>
+        <tr><td>43</td><td class="num">4 885 / 5 008 (97,5 %)</td><td class="num">14</td><td class="num">11,8</td><td class="num">15</td><td class="num">46</td><td>VALID</td></tr>
+        <tr><td>44</td><td class="num">4 829 / 5 014 (96,3 %)</td><td class="num">21</td><td class="num">13,0</td><td class="num">18</td><td class="num">53</td><td>VALID</td></tr>
+      </tbody>
+    </table></div>
+    <p>Före LNS lämnade samma dag 22 oplanerade besök (seed 42). Ruin-and-recreate-sökningen gav den största förbättringen i hela projektet.</p>
+    <h3>Underbemannad dag (1 516 insatser, 24 medarbetare)</h3>
+    <p>74,5 % av insatserna planerade, 44 oplanerade besök. Alla 44 fick förslag. Bästa förslaget var en mindre avvikelse för 14 besök, poolpersonal för 20 och en större avvikelse för 10. Inget besök hade en lösning helt inom reglerna utan extra resurs. Auto-fix inom reglerna planerade 3 fler besök (74,5 % → 76,2 %) på 110 s, och planen förblev giltig.</p>
+    <h3>Live-dag</h3>
+    <p>7 händelser: 2 VAB, 2 trygghetslarm, 2 flyttade mediciner och en försening. Alla 7 planer var giltiga. Larmen hade personal på plats efter 6 min. Varje händelse planerades om på 2,5–6,2 s. Oplanerade besök ökade från 6 till 16 under dagen (97,4 % av insatserna fortfarande planerade), och varje nytt oplanerat besök fick sitt bästa förslag i flödet.</p>
+    <h3>En vecka</h3>
+    <div class="figures">
+      <div><div class="n">35 253</div><div class="l">insatser måndag–söndag</div></div>
+      <div><div class="n">95,2 %</div><div class="l">planerade (33 544)</div></div>
+      <div><div class="n">3 977 / 4 167</div><div class="l">besök</div></div>
+      <div><div class="n">7 / 7</div><div class="l">dagar giltiga</div></div>
+      <div><div class="n">840</div><div class="l">veckokontroller utan fel</div></div>
+      <div><div class="n">≈ 3 min</div><div class="l">hela veckan</div></div>
+    </div>
+    <h3>Experiment A–E (seed 42)</h3>
+    <p>Grundplan 582 av 587. Därefter samma händelsekedja för alla: två sjukanmälningar 10:14, trafik ×1,6 10:34, försening 10:44, flyttad medicin 10:54.</p>
+    <div class="tbl"><table>
+      <thead><tr><th>Strategi</th><th class="num">Oplanerade till slut</th><th class="num">Tappade</th><th class="num">Hårda fel</th><th class="num">Restid (min)</th><th class="num">Ändrade tilldelningar</th></tr></thead>
+      <tbody>
+        <tr><td>A · Bas</td><td class="num">17</td><td class="num">15</td><td class="num">0</td><td class="num">8 359</td><td class="num">84</td></tr>
+        <tr><td>B · Utökad reparation</td><td class="num">19</td><td class="num">14</td><td class="num">0</td><td class="num">7 945</td><td class="num">71</td></tr>
+        <tr><td>C · Rådgivare (fallbaserad, ingen API-nyckel)</td><td class="num">16</td><td class="num">14</td><td class="num">0</td><td class="num">8 372</td><td class="num">84</td></tr>
+        <tr><td>D · Mock-klassificerare</td><td class="num">14</td><td class="num">10</td><td class="num">0</td><td class="num">8 202</td><td class="num">96</td></tr>
+        <tr><td>E · Inlärd (ML)</td><td class="num">14</td><td class="num">12</td><td class="num">0</td><td class="num">8 203</td><td class="num">103</td></tr>
+      </tbody>
+    </table></div>
+    <p>På det här enda fallet slutar D och E med minst oplanerade, men med fler ändrade tilldelningar. Ett enda seed visar inte att någon strategi är bättre. Korsvalideringen över 96 fall (avsnitt Maskininlärning) är det mått som gäller, och där slår E inte standardvalet ännu.</p>
+
+    <h2 id="begransningar">Begränsningar</h2>
+    <ul>
+      <li>Raster tas vid teamets kontor. Om resan dit skulle bryta mot 5-timmarsregeln tas rasten på plats.</li>
+      <li>Restiden ändras per händelse, inte timme för timme inom en lösning.</li>
+      <li>Veckan optimeras dag för dag i ordning, inte som ett enda problem. Schemat är indata.</li>
+      <li>ML-modellen är tränad på simulerade fall och syntetisk data. Den behöver riktiga utfall för att kunna sägas fungera i drift.</li>
+      <li>Läkemedelstider dras om varje dag i testdatan.</li>
+    </ul>
+    <footer>Den här sidan finns i appen under /documentation. Alla personer och adresser är syntetiska.</footer>
+  </main>
+</div>
+
+</body>
+</html>

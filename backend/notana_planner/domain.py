@@ -285,6 +285,8 @@ class Plan:
     travel_source: str = "synthetic"
     parent_plan_id: str | None = None
     day: int = 0
+    # Rule deviations a planner explicitly approved (see suggestions.apply_relaxed).
+    exceptions: list[dict[str, Any]] = field(default_factory=list)
 
 
 def to_jsonable(obj: Any) -> Any:

@@ -1,12 +1,16 @@
 import { esc, fmtNum, hhmm, pct } from "./util.js";
 
 const KPIS = [
+  ["interventions_planned_share", "Interventions planned", "pct", -1],
+  ["interventions_unplanned", "Unplanned interventions", 0, 1],
   ["planned_visits", "Planned visits", 0, -1],
   ["unplanned_visits", "Unplanned visits", 0, 1],
   ["unplanned_high_priority", "Unplanned prio 5", 0, 1],
   ["hard_violations", "Hard violations", 0, 1],
   ["travel_minutes", "Travel (min)", 0, 1],
   ["avg_travel_per_visit", "Travel / visit", 1, 1],
+  ["p90_leg_minutes", "90 % of trips ≤ (min)", 0, 1],
+  ["longest_leg_minutes", "Longest trip (min)", 0, 1],
   ["preferred_time_deviation_avg", "Pref. deviation avg (min)", 1, 1],
   ["continuity_known_share", "Continuity (known staff)", "pct", -1],
   ["gender_wish_met_share", "Gender wish met", "pct", -1],
@@ -36,7 +40,9 @@ export function renderKpis(el, plan, parent) {
       }
     }
     const cls = k === "hard_violations" ? (v ? "bad" : "ok") : k === "unplanned_high_priority" && v ? "bad" : "";
-    return `<div class="kpi ${cls}"><div class="v">${kv(v, d)}</div><div class="l">${label}</div>${delta}</div>`;
+    const sub = k === "interventions_planned_share" && s.interventions_total
+      ? `<div class="l">${fmtNum(s.interventions_planned)} of ${fmtNum(s.interventions_total)}</div>` : "";
+    return `<div class="kpi ${cls}"><div class="v">${kv(v, d)}</div><div class="l">${label}</div>${sub}${delta}</div>`;
   }).join("");
   const stab = s.stability || {};
   if (stab.compared_to) {
@@ -44,19 +50,49 @@ export function renderKpis(el, plan, parent) {
   }
 }
 
-export function renderConflicts(el, state, onVisit) {
+const LEVEL = { within_rules: "within rules", minor: "minor deviation", major: "major deviation", not_permitted: "not permitted", resource: "extra resource" };
+
+function suggestionBlock(opts) {
+  if (!opts) return "";
+  if (!opts.length) return '<div class="hint">No option found.</div>';
+  return `<div class="sugg">${opts.slice(0, 5).map((o) => `<div class="opt">
+      <span class="lvl ${o.level}">${LEVEL[o.level] || o.level}</span>
+      <span class="pts" title="severity points (0 = within all rules)">${o.severity} pts</span>
+      <b>${esc(o.title)}</b>
+      ${o.kind === "replan" ? `<span class="v">${o.changes} visit(s) change in ${o.routes.length} routes${o.also_planned?.length ? ` · also plans ${esc(o.also_planned.join(", "))}` : ""}</span>` : ""}
+      ${o.violations.length ? `<span class="v">${o.violations.map((x) => esc(x.text)).join(" · ")}</span>` : ""}
+      ${o.pushed_visits?.length ? `<span class="v">moves ${esc(o.pushed_visits.join(", "))}</span>` : ""}
+      <button data-apply="${o.id}" data-kind="${o.kind}">${o.kind === "pool" ? "Call in pool staff" : o.severity ? "Apply as approved exception" : "Apply"}</button>
+    </div>`).join("")}</div>`;
+}
+
+export function renderConflicts(el, state, onVisit, actions = {}) {
   const plan = state.plan;
   if (!plan) return (el.innerHTML = '<div class="empty">No plan yet.</div>');
   const rows = Object.values(plan.unplanned).map((u) => ({ u, v: state.visitsById[u.visit_id] })).filter((x) => x.v);
   rows.sort((a, b) => b.v.priority - a.v.priority || a.v.earliest - b.v.earliest);
-  if (!rows.length) return (el.innerHTML = '<div class="empty">Every visit is planned. 🎉</div>');
+  const s = plan.score;
+  const ivLine = `<p><b>${fmtNum(s.interventions_planned)} of ${fmtNum(s.interventions_total)} interventions planned (${pct(s.interventions_planned_share)})</b> · ${fmtNum(s.interventions_unplanned)} interventions in ${rows.length} unplanned visits</p>`;
+  const exc = plan.validation?.approved_exceptions?.length
+    ? `<p class="hint">${plan.validation.approved_exceptions.length} rule deviation(s) in this plan are approved exceptions: ${plan.exceptions.map((x) => esc(x.visit_id)).join(", ")}.</p>` : "";
+  if (!rows.length) return (el.innerHTML = `${ivLine}${exc}<div class="empty">Every visit is planned. 🎉</div>`);
+  const sug = state.suggestions && state.suggestions.plan_id === plan.id ? state.suggestions : null;
+  const fix = state.autofix;
   const byCode = {};
   for (const { u } of rows) {
     const c = u.reasons[0]?.code || "UNKNOWN";
     byCode[c] = (byCode[c] || 0) + 1;
   }
+  const ss = sug?.summary;
   el.innerHTML = `
     <h3>${rows.length} visits cannot currently be planned</h3>
+    ${ivLine}${exc}
+    <div class="actions">
+      <button class="primary" id="btn-suggest">${sug ? "Recompute solutions" : "Find solutions for every unplanned visit"}</button>
+      <button id="btn-autofix" title="Deep re-optimisation of all open visits, then a local re-plan of the nearest routes per visit. Only valid plans that lose no planned visit are kept.">Auto-fix within rules</button>
+    </div>
+    ${fix ? `<p class="hint">Auto-fix: ${fix.net_planned_gain} more visit(s) planned within the rules (${fix.unplanned_before} → ${fix.unplanned_after} unplanned; ${pct(fix.interventions_planned_share_before)} → ${pct(fix.interventions_planned_share_after)} of interventions), ${fix.seconds} s.</p>` : ""}
+    ${ss ? `<p>Best option per visit: <span class="lvl within_rules">within rules</span> ${ss.within_rules} · <span class="lvl minor">minor</span> ${ss.minor} · <span class="lvl resource">extra resource</span> ${ss.resource} · <span class="lvl major">major</span> ${ss.major} · <span class="lvl not_permitted">not permitted</span> ${ss.not_permitted}. Options are sorted by severity, least first; applying one with deviations records an approved exception that the validator keeps reporting.</p>` : ""}
     <p>${Object.entries(byCode).map(([c, n]) => `<span class="code">${esc(c)}</span> ${n}`).join(" &nbsp; ")}</p>
     <p class="hint">Reasons are computed from the final plan by deterministic gap analysis (other visits fixed). The engine never forces an invalid assignment or shortens care to make a visit fit.</p>
     <div class="scroll"><table>
@@ -67,9 +103,19 @@ export function renderConflicts(el, state, onVisit) {
           <td>${hhmm(v.earliest)}–${hhmm(v.latest)} <span class="pill">${v.timing}</span></td>
           <td class="num">${v.duration}</td><td class="num">${v.priority}</td><td>${v.staff === 2 ? "2 (sync)" : "1"}</td>
           <td>${[...v.delegations, ...v.skills].map((x) => `<span class="pill">${esc(x)}</span>`).join("")}</td>
-          <td>${u.reasons.map((r) => `<div><span class="code ${r.code.startsWith("NO_") ? "bad" : ""}">${esc(r.code)}</span> ${esc(r.message)}</div>`).join("")}</td>
+          <td>${u.reasons.map((r) => `<div><span class="code ${r.code.startsWith("NO_") ? "bad" : ""}">${esc(r.code)}</span> ${esc(r.message)}</div>`).join("")}
+            ${sug ? suggestionBlock(sug.visits[v.id]) : ""}</td>
         </tr>`).join("")}</tbody></table></div>`;
-  el.querySelectorAll("tr[data-visit]").forEach((tr) => tr.addEventListener("click", () => onVisit(tr.dataset.visit)));
+  el.querySelectorAll("tr[data-visit]").forEach((tr) => tr.addEventListener("click", (ev) => {
+    if (ev.target.closest("button")) return;
+    onVisit(tr.dataset.visit);
+  }));
+  el.querySelector("#btn-suggest")?.addEventListener("click", () => actions.suggest?.());
+  el.querySelector("#btn-autofix")?.addEventListener("click", () => actions.autofix?.());
+  el.querySelectorAll("button[data-apply]").forEach((b) => b.addEventListener("click", () => {
+    const opt = Object.values(sug.visits).flat().find((o) => o.id === b.dataset.apply);
+    if (opt) actions.apply?.(opt);
+  }));
 }
 
 export function renderScore(el, plan) {
@@ -250,4 +296,65 @@ export function renderWeek(el, w, onDay) {
       ${w.employees.map((e) => `<tr><td>${esc(e.employee_id)} · ${esc(e.name)}</td><td>${esc(e.team)}</td><td>${esc(e.shift)}</td>${e.hours.map((h, i) => `<td class="num ${h === null && e.days_off.includes(w.days[i].weekday) ? "off" : ""}">${h === null ? (e.days_off.includes(w.days[i].weekday) ? "off" : "–") : h.toFixed(1)}</td>`).join("")}<td class="num ${e.worked_hours > e.contract_hours + rules.max_weekly_overtime_h ? "over" : ""}">${e.worked_hours.toFixed(1)}</td><td class="num">${e.contract_hours.toFixed(1)}</td></tr>`).join("")}
     </tbody></table></div>`;
   el.querySelectorAll("a[data-sid]").forEach((a) => a.addEventListener("click", (ev) => { ev.preventDefault(); onDay(a.dataset.sid); }));
+}
+
+
+const ICON = { alarm: "🚨", child_sick: "🧒", employee_delayed: "⏱", traffic: "🚗", employee_sick: "🤒", visit_cancelled: "✖", medication_moved: "💊" };
+
+export function renderLiveFeed(el, feed, onPlan) {
+  if (!feed?.length) {
+    el.innerHTML = '<div class="empty">Waiting for the first event…</div>';
+    return;
+  }
+  el.innerHTML = [...feed].reverse().map((e) => e.skipped ? `<div class="ev"><span class="t">${hhmm(e.clock)}</span> ${esc(e.label)}: ${esc(e.title)}</div>` : `
+    <div class="ev ${e.kind}">
+      <div class="top"><span class="t">${esc(e.clock_text)}</span><span>${ICON[e.kind] || ""} <b>${esc(e.label)}</b></span>
+        <span class="badge ${e.valid ? "ok" : "bad"}">${esc(e.status)}</span>
+        ${e.kind === "alarm" && e.response_minutes != null ? `<span class="badge ${e.response_minutes <= 15 ? "ok" : "warn"}">${esc(e.dispatched)} on site in ${e.response_minutes} min</span>` : ""}
+        <button data-plan="${e.plan_id}">Show this plan</button></div>
+      <div>${esc(e.title)}</div>
+      <div class="meta">${e.visits_changed} visit(s) changed · ${e.routes_unchanged ?? "–"} routes untouched · ${e.unplanned_total} unplanned in total · ${pct(e.interventions_planned_share)} of interventions planned · re-planned in ${e.seconds} s (${esc(e.strategy_used)})</div>
+      ${e.newly_unplanned.length ? `<div class="meta">Newly unplanned: ${e.newly_unplanned.map(esc).join(", ")}</div>` : ""}
+      ${e.suggestions.map((h) => `<div class="meta">→ best option for ${esc(h.visit_id)}: <span class="lvl ${h.best.level}">${LEVEL[h.best.level] || h.best.level}</span> ${esc(h.best.title)}${h.best.violations.length ? ` (${h.best.violations.map((x) => esc(x.text)).join("; ")})` : ""}</div>`).join("")}
+      <details><summary>Re-planning report</summary><pre>${esc(e.summary)}</pre></details>
+    </div>`).join("");
+  el.querySelectorAll("button[data-plan]").forEach((b) => b.addEventListener("click", () => onPlan(b.dataset.plan)));
+}
+
+
+const ACTION_TEXT = { local: "local repair, escalate if needed (default)", local_enhanced: "local + ejection-chain repair",
+  expanded: "start with the expanded neighbourhood", broad: "start with a broad re-optimisation" };
+
+export function renderML(el, d) {
+  if (!d) return (el.innerHTML = '<div class="empty">Loading…</div>');
+  const m = d.model || {};
+  const ev = m.evaluation;
+  const bar = (v, max) => `<span style="display:inline-block;height:8px;width:${Math.round(160 * v / (max || 1))}px;background:var(--brand);border-radius:4px"></span>`;
+  const maxImp = Math.max(...(m.feature_importance || [{ importance: 1 }]).map((x) => x.importance));
+  el.innerHTML = `
+    <h3>Learned re-planning strategy selector</h3>
+    <p class="hint">What is learned: which re-planning strategy works best for an incident. Each training case is a simulated incident (alarm, sick child, delay, traffic, sickness, cancellation, moved medication) on a planned day; <b>all four strategies are run on the same case</b> and measured (lost promised visits, extra unplanned, visits changed, runtime, validity). One gradient-boosted model per strategy predicts that score from the incident's features; strategy <b>E</b> uses the prediction. Strategy <b>C</b> (advisor) also receives the most similar cases (case-based advice; Claude gets them in its facts when an API key is set). The model only chooses search parameters: plans are still built by the optimizer and checked by the independent validator.</p>
+    <div class="kpis" style="margin:10px 0">
+      <div class="kpi ${m.trained ? "ok" : ""}"><div class="v">${m.trained ? "trained" : "not trained"}</div><div class="l">${m.available === false ? "scikit-learn missing" : esc(m.trained_at || m.note || "")}</div></div>
+      <div class="kpi"><div class="v">${fmtNum(d.cases_total)}</div><div class="l">training cases (${d.cases_from_app} from this app)</div></div>
+      ${ev && ev.mean_regret ? `
+      <div class="kpi"><div class="v">${ev.mean_regret.learned}</div><div class="l">mean regret, learned (cross-validated)</div></div>
+      <div class="kpi"><div class="v">${ev.mean_regret.default}</div><div class="l">mean regret, always default</div></div>
+      <div class="kpi"><div class="v">${pct(ev.picked_best_share.learned)}</div><div class="l">cases where learned pick = best (default ${pct(ev.picked_best_share.default)})</div></div>
+      <div class="kpi"><div class="v">${ev.lost_visits_total.learned} / ${ev.lost_visits_total.default}</div><div class="l">promised visits lost: learned / default (oracle ${ev.lost_visits_total.oracle})</div></div>` : ""}
+    </div>
+    ${ev && ev.mean_score ? `<p>${ev.folds}-fold cross-validation on ${ev.cases} cases (the model never sees the case it is scored on). Mean score (lower = better): learned <b>${ev.mean_score.learned}</b>, always default <b>${ev.mean_score.default}</b>, best possible <b>${ev.mean_score.oracle}</b>. Learned beat the default on ${ev.better_than_default} cases and did worse on ${ev.worse_than_default}. ${ev.mean_regret.learned < ev.mean_regret.default ? "The learned selector is measurably better than the default on these cases." : "The learned selector is <b>not</b> better than the default on these cases; more or more varied cases are needed."}</p>` : `<p class="hint">${esc(ev?.note || "Evaluation runs after training.")}</p>`}
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px">
+      <div><h4>Strategies</h4><table><thead><tr><th>Strategy</th><th class="num">best in</th><th class="num">chosen (CV)</th></tr></thead><tbody>
+        ${(m.actions || Object.keys(ACTION_TEXT)).map((a) => `<tr><td><b>${esc(a)}</b> · ${esc(ACTION_TEXT[a] || "")}</td><td class="num">${ev?.best_action_counts?.[a] ?? "–"}</td><td class="num">${ev?.chosen_action_counts?.[a] ?? "–"}</td></tr>`).join("")}
+      </tbody></table></div>
+      <div><h4>What the model looks at</h4><table><tbody>
+        ${(m.feature_importance || []).map((f) => `<tr><td>${esc(f.feature)}</td><td>${bar(f.importance, maxImp)}</td><td class="num">${f.importance.toFixed(3)}</td></tr>`).join("") || '<tr><td class="hint">train the model first</td></tr>'}
+      </tbody></table></div>
+    </div>
+    <h4>Cases by incident</h4><p>${Object.entries(d.cases_by_kind).map(([k, n]) => `<span class="pill">${esc(k)} ${n}</span>`).join(" ")}</p>
+    <h4>Latest cases</h4>
+    <div class="scroll"><table><thead><tr><th>Source</th><th>Incident</th><th>Best</th>${Object.keys(ACTION_TEXT).map((a) => `<th class="num">${a}</th>`).join("")}</tr></thead><tbody>
+      ${d.recent.map((c) => `<tr><td>${esc(c.source)}</td><td>${esc(c.incident.kind)} ${hhmm(c.incident.clock)}</td><td><b>${esc(c.best)}</b></td>${Object.keys(ACTION_TEXT).map((a) => `<td class="num">${c.scores[a] ?? "–"}</td>`).join("")}</tr>`).join("")}
+    </tbody></table></div>`;
 }

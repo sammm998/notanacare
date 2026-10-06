@@ -2,6 +2,7 @@ ortools>=9.10
 fastapi>=0.110
 uvicorn>=0.29
 pydantic>=2.6
+scikit-learn>=1.4  # machine learning: strategy selector (optional at runtime)
 anthropic>=1.0   # optional: only used when ANTHROPIC_API_KEY is set
 pytest>=8        # tests
 httpx>=0.27      # tests (FastAPI TestClient)

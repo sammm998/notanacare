@@ -49,14 +49,26 @@ class WeekReport:
         return {"valid": self.valid, "errors": [e.to_dict() for e in self.errors], "checks": self.checks}
 
 
-def _work_interval(plan: Plan, eid: str) -> tuple[int, int, int] | None:
+def _work_interval(plan: Plan, eid: str, emp=None) -> tuple[int, int, int] | None:  # noqa: ANN001
     """(start, end, worked minutes) of an employee's day, or None if no work."""
     r = plan.routes.get(eid)
     if r is None or not r.stops or r.route_start is None:
         return None
     end = r.route_end if r.route_end is not None else max(s.end for s in r.stops)
-    rests = sum(s.end - s.start for s in r.stops if s.kind in ("break", "unavailable") and s.end - s.start >= 30)
-    return r.route_start, end, max(0, end - r.route_start - rests)
+    spans = [(s.start, s.end) for s in r.stops if s.kind in ("break", "unavailable") and s.end - s.start >= 30]
+    if emp is not None:
+        spans += [(max(iv.start, r.route_start), min(iv.end, end)) for iv in emp.unavailable if iv.end - iv.start >= 30]
+    rest, cur = 0, None
+    for a, b in sorted(x for x in spans if x[1] > x[0]):
+        if cur and a <= cur[1]:
+            cur[1] = max(cur[1], b)
+        else:
+            if cur:
+                rest += cur[1] - cur[0]
+            cur = [a, b]
+    if cur:
+        rest += cur[1] - cur[0]
+    return r.route_start, end, max(0, end - r.route_start - rest)
 
 
 def validate_week(scenarios: list[Scenario], plans: list[Plan | None]) -> WeekReport:
@@ -73,7 +85,7 @@ def validate_week(scenarios: list[Scenario], plans: list[Plan | None]) -> WeekRe
         for d, (sc, plan) in enumerate(zip(scenarios, plans)):
             if plan is None or eid not in sc.employees:
                 continue
-            iv = _work_interval(plan, eid)
+            iv = _work_interval(plan, eid, sc.employees[eid])
             if iv is not None:
                 work.append((d, d * DAY + iv[0], d * DAY + iv[1], iv[2]))
         # Dygnsvila between consecutive work periods
@@ -169,7 +181,7 @@ def week_summary(scenarios: list[Scenario], plans: list[Plan | None]) -> dict:
             })
             if p is None:
                 continue
-            iv = _work_interval(p, eid)
+            iv = _work_interval(p, eid, e)
             h = round(iv[2] / 60, 2) if iv else 0.0
             row["hours"][d] = h
             row["worked_hours"] = round(row["worked_hours"] + h, 2)

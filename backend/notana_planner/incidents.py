@@ -15,6 +15,7 @@ from .domain import (
     BreakRule,
     Employee,
     EmployeeStatus,
+    Intervention,
     Interval,
     Plan,
     TimingKind,
@@ -33,6 +34,8 @@ INCIDENT_KINDS = (
     "employee_delayed",
     "extra_staff",
     "visit_cancelled",
+    "child_sick",
+    "alarm",
 )
 
 
@@ -99,6 +102,8 @@ def apply_incident(world: World, plan: Plan, inc: Incident) -> IncidentEffect:
         "employee_delayed": _delayed,
         "extra_staff": _extra_staff,
         "visit_cancelled": _cancelled,
+        "child_sick": _child_sick,
+        "alarm": _alarm,
     }.get(inc.kind)
     if handler is None:
         raise ValueError(f"Unknown incident kind '{inc.kind}'. Known: {INCIDENT_KINDS}")
@@ -337,8 +342,8 @@ def _extra_staff(world: World, plan: Plan, inc: Incident) -> IncidentEffect:
             shift_end=end,
             start_location_id=base,
             end_location_id=base,
-            skills=[C.HOIST, C.DEMENTIA],
-            delegations=[C.MEDICATION, C.INSULIN],
+            skills=sorted({C.HOIST, C.DEMENTIA} | set(inc.params.get("skills") or [])),
+            delegations=sorted({C.MEDICATION, C.INSULIN} | set(inc.params.get("delegations") or [])),
             breaks=breaks,
         )
         added.append(eid)
@@ -366,4 +371,127 @@ def _cancelled(world: World, plan: Plan, inc: Incident) -> IncidentEffect:
         changed_visits={vid},
         widen_to_unplanned=True,
         facts={"cancelled": vid},
+    )
+
+
+def _position_at(world: World, plan: Plan, eid: str, clock: int) -> tuple[str, int, str]:
+    """(location, time free, what they are doing) for an employee at ``clock``.
+    An ongoing visit or break is finished first; between stops the employee is
+    counted from the last stop (travel already under way is not credited)."""
+    emp = world.scenario.employees[eid]
+    loc, free, doing = emp.current_location_id or emp.start_location_id, max(clock, emp.shift_start), "at the office"
+    if emp.available_from is not None:
+        free = max(free, emp.available_from)
+    r = plan.routes.get(eid)
+    for s in sorted(r.stops if r else [], key=lambda s: s.start):
+        if s.start <= clock:
+            loc = s.location_id
+            if s.end > clock:
+                free = max(free, s.end)
+                doing = f"finishing {s.visit_id or s.kind} until {fmt_time(s.end)}"
+            else:
+                doing = f"after {s.visit_id or s.kind}"
+    return loc, free, doing
+
+
+def _child_sick(world: World, plan: Plan, inc: Incident) -> IncidentEffect:
+    """VAB: the employee finishes the visit in progress, then leaves to pick up a sick child."""
+    eid = inc.params["employee_id"]
+    back = inc.params.get("return_minutes")
+    emp = world.scenario.employees[eid]
+    clock = inc.clock
+    _, busy_until, doing = _position_at(world, plan, eid, clock)
+    until = emp.shift_end if not back else min(emp.shift_end, busy_until + int(back))
+    emp.unavailable.append(Interval(busy_until, max(busy_until, until), "child sick (VAB)"))
+    released = {v for v in _future_visits_of(plan, eid, clock)
+                if plan.assignments[v].start < until}
+    for v in released:
+        world.scenario.visits[v].locked = False
+    ret = f", back {fmt_time(until)}" if back and until < emp.shift_end else " for the rest of the day"
+    return IncidentEffect(
+        kind=inc.kind,
+        clock=clock,
+        description=f"{eid}'s child is sick at {fmt_time(clock)}: {eid} leaves after {doing.split(' until')[0].replace('finishing ', '')} "
+                    f"({fmt_time(busy_until)}) to pick up the child{ret}.",
+        affected_employees={eid} | _partners(plan, released),
+        released_visits=released,
+        facts={"employee": eid, "leaves_at": busy_until, "back_at": until if back else None,
+               "future_visits_affected": len(released)},
+    )
+
+
+def _alarm(world: World, plan: Plan, inc: Incident) -> IncidentEffect:
+    """Safety alarm (trygghetslarm): a new urgent visit; the employee who can be
+    there first is dispatched and their later visits are re-planned."""
+    sc = world.scenario
+    clock = inc.clock
+    rid = inc.params["recipient_id"]
+    duration = int(inc.params.get("duration", 20))
+    max_response = int(inc.params.get("max_response_minutes", 45))
+    r = sc.recipients[rid]
+    for x, a in plan.assignments.items():
+        if sc.visits.get(x) and sc.visits[x].recipient_id == rid and a.start <= clock < a.end + 10:
+            raise ValueError(f"{rid} has {x} in progress ({', '.join(a.employee_ids)} until {fmt_time(a.end)}): "
+                             "the staff on site answer the alarm")
+    n = sum(1 for k in sc.visits if k.startswith("ALARM-")) + 1
+    vid = f"ALARM-{n:02d}"
+    iid = f"I-ALARM-{n:02d}"
+    sc.interventions[iid] = Intervention(
+        id=iid, recipient_id=rid, type="alarm_response", duration_minutes=duration, required_skills=[],
+        required_delegations=[], priority=5, timing=TimingKind.HARD, preferred_time=clock,
+        earliest_start=clock, latest_start=clock + max_response, requires_double_staffing=False,
+        notes="Safety alarm response", source={"system": "trygghetslarm", "synthetic": True},
+    )
+    v = _make_visit(vid, r, [sc.interventions[iid]])
+    v.slot = "alarm"
+    sc.visits[vid] = v
+    # Fastest responder among employees on shift who may visit this recipient.
+    from .diagnostics import _qualifies
+
+    tm = world.travel()
+    ranked = []
+    for eid, emp in sc.employees.items():
+        if emp.status != EmployeeStatus.WORKING or emp.shift_end < clock + duration or emp.shift_start > clock + max_response:
+            continue
+        if _qualifies(sc, eid, v, 0):
+            continue
+        loc, free, doing = _position_at(world, plan, eid, clock)
+        arrive = free + tm.for_employee(emp).minutes(loc, r.location_id)
+        if arrive > clock + max_response or arrive + duration > emp.shift_end:
+            continue
+        # Not someone who is (about to be) unavailable: sick, VAB, split-shift gap, break window closing.
+        if any(iv.start < arrive + duration + 30 and iv.end > free for iv in emp.unavailable):
+            continue
+        ranked.append(((arrive, eid), eid, loc, free, doing))
+    ranked.sort()
+    best = ranked[0] if ranked else None
+    if best is None:
+        return IncidentEffect(
+            kind=inc.kind, clock=clock,
+            description=f"Safety alarm from {rid} at {fmt_time(clock)}: nobody can be there within {max_response} min.",
+            released_visits={vid}, zones={r.zone}, facts={"alarm_visit": vid, "dispatched": None},
+        )
+    (arrive, eid), _, loc, free, doing = best
+    # Everything the dispatched employee had from the alarm on, and any visit of the
+    # same recipient overlapping the alarm, is re-planned.
+    released = {x for x in _future_visits_of(plan, eid, clock) if plan.assignments[x].start < 24 * 60}
+    for x, a in plan.assignments.items():
+        if sc.visits.get(x) and sc.visits[x].recipient_id == rid and a.start < arrive + duration and a.end > arrive:
+            released.add(x)
+    released.add(vid)
+    for x in released:
+        if x in sc.visits:
+            sc.visits[x].locked = False
+    return IncidentEffect(
+        kind=inc.kind,
+        clock=clock,
+        description=(f"Safety alarm from {rid} ({r.address}) at {fmt_time(clock)}: {eid} dispatched ({doing}), "
+                     f"arrives {fmt_time(arrive)}, {arrive - clock} min after the alarm."),
+        affected_employees={eid} | _partners(plan, released - {vid}),
+        released_visits=released,
+        zones={r.zone},
+        facts={"alarm_visit": vid, "dispatched": eid, "arrive": arrive, "response_minutes": arrive - clock,
+               "pin": {vid: [eid, arrive]}, "employee_was": doing,
+               # Fallbacks if the first responder's day cannot absorb the alarm.
+               "responders": [[e, k[0], d] for k, e, _, _, d in ranked[:5]]},
     )

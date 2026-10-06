@@ -18,6 +18,8 @@ class ObjectiveWeights:
     priority_multiplier: float = 0.6  # penalty *= 1 + multiplier * (priority - 1)
     travel_minute: int = 20
     travel_km: int = 2
+    long_leg_minute: int = 150  # extra per travel minute beyond long_leg_threshold_min (compact routes)
+    long_leg_threshold_min: int = 15
     preferred_time_minute: int = 3  # per minute away from preferred start
     continuity_unknown_employee: int = 150  # employee has never visited the recipient
     continuity_preferred_bonus: int = 120  # (as a penalty for NOT using a preferred employee)
@@ -28,6 +30,7 @@ class ObjectiveWeights:
     gender_wish_mismatch: int = 500  # per staff member of the non-wished gender
     language_wish_mismatch: int = 250  # per staff member without the recipient's language
     outside_preferred_zone: int = 40  # per visit outside the employee's preferred area
+    outside_team_zone: int = 60  # per visit outside the employee's own team area (compact routes)
     # Re-planning stability
     employee_change: int = 900  # per visit-slot moved to another employee
     time_change_minute: int = 12  # per minute away from previously communicated start

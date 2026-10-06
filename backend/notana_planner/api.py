@@ -33,6 +33,10 @@ from .replanning import clone_world, replan_with_strategy
 from .store import Database, Session, SessionStore
 from .travel import make_provider
 from .validator import validate_plan
+from .live import run_live
+from .ml.cases import generate_cases
+from .ml.model import selector
+from .suggestions import apply_option, autofix, public, suggest_for_plan
 from .week import plan_week, week_summary
 
 log = logging.getLogger("notana")
@@ -44,8 +48,15 @@ POOL = ThreadPoolExecutor(max_workers=int(os.environ.get("NOTANA_WORKERS", "2"))
 JOBS: dict[str, dict[str, Any]] = {}
 WORLD_SNAPSHOTS: dict[str, World] = {}  # plan id -> world state the plan belongs to
 WEEKS: dict[str, list[str]] = {}  # week id -> day scenario ids (Mon..Sun)
+ML_STORE = Path(os.environ.get("NOTANA_ML_CASES", str(ROOT / "data" / "ml_cases.jsonl")))
+SUGGESTIONS: dict[str, dict[str, list[dict]]] = {}  # plan id -> visit id -> options (with private payload)
 
 app = FastAPI(title="Notana Care Planning Simulator", version="1.0.0")
+# Train the strategy selector from the case data (bundled + generated in the app)
+# in the background, so start-up is not delayed.
+import threading as _threading  # noqa: E402
+
+_threading.Thread(target=lambda: selector(ML_STORE).train(evaluate_cv=True), daemon=True).start()
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 
@@ -201,9 +212,17 @@ class IncidentIn(BaseModel):
 class ExperimentIn(BaseModel):
     scenario: ScenarioIn = ScenarioIn()
     incidents: list[IncidentIn] = []
-    strategies: list[str] = ["baseline", "enhanced", "advisor", "classifier"]
+    strategies: list[str] = ["baseline", "enhanced", "advisor", "classifier", "learned"]
     base_time_limit_s: float = Field(25, ge=2, le=120)
     skip_llm_without_key: bool = False
+
+
+class LiveIn(BaseModel):
+    start: int = Field(7 * 60 + 30, ge=0, le=24 * 60)
+    end: int = Field(20 * 60, ge=0, le=24 * 60)
+    events: int = Field(8, ge=1, le=40)
+    seed: int = 7
+    pace_s: float = Field(1.5, ge=0, le=10)
 
 
 class LockIn(BaseModel):
@@ -525,6 +544,192 @@ def incident(sid: str, body: IncidentIn) -> dict:
     return submit("incident", work)
 
 
+def _record(s: Session, plan: Plan, ev: dict) -> None:
+    s.plans[plan.id] = plan
+    s.current_plan_id = plan.id
+    WORLD_SNAPSHOTS[plan.id] = clone_world(s.world)
+    DB.save_plan(plan)
+    s.history.append(ev)
+    DB.save_event(s.id, ev["type"], ev)
+
+
+def _current_plan(pid: str) -> tuple[Session, Plan]:
+    s, p = _plan(pid)
+    if s.current_plan_id != pid:
+        raise HTTPException(409, "suggestions work on the current plan; activate this plan first")
+    return s, p
+
+
+def _suggestions_payload(pid: str) -> dict:
+    sug = SUGGESTIONS.get(pid, {})
+    total = len(sug)
+    best = {vid: (opts[0]["level"] if opts else None) for vid, opts in sug.items()}
+    return {
+        "plan_id": pid,
+        "visits": {vid: [public(o) for o in opts] for vid, opts in sug.items()},
+        "summary": {
+            "unplanned": total,
+            "within_rules": sum(1 for b in best.values() if b == "within_rules"),
+            "minor": sum(1 for b in best.values() if b == "minor"),
+            "major": sum(1 for b in best.values() if b == "major"),
+            "resource": sum(1 for b in best.values() if b == "resource"),
+            "not_permitted": sum(1 for b in best.values() if b == "not_permitted"),
+        },
+    }
+
+
+@app.post("/api/plans/{pid}/suggestions")
+def compute_suggestions(pid: str) -> dict:
+    s, p = _current_plan(pid)
+
+    def work(job: dict) -> dict:
+        with s.lock:
+            SUGGESTIONS[pid] = suggest_for_plan(s.world, p, progress=job["progress"].append)
+        return _suggestions_payload(pid)
+
+    return submit("suggestions", work)
+
+
+@app.get("/api/plans/{pid}/suggestions")
+def get_suggestions(pid: str) -> dict:
+    if pid not in SUGGESTIONS:
+        raise HTTPException(404, "no suggestions computed for this plan")
+    return _suggestions_payload(pid)
+
+
+@app.post("/api/plans/{pid}/suggestions/{oid}/apply")
+def apply_suggestion(pid: str, oid: str) -> dict:
+    s, p = _current_plan(pid)
+    opt = next((o for opts in SUGGESTIONS.get(pid, {}).values() for o in opts if o["id"] == oid), None)
+    if opt is None:
+        raise HTTPException(404, "unknown suggestion (recompute suggestions for the current plan)")
+    if opt["kind"] == "pool":
+        raise HTTPException(400, "apply pool options as an 'extra staff' incident")
+    with s.lock:
+        new = apply_option(s.world, p, opt)
+        ev = {"type": "suggestion", "plan_id": new.id, "before_plan_id": p.id, "visit_id": opt["visit_id"],
+              "option": public(opt), "summary": f"{opt['visit_id']}: {opt['title']}"
+              + ("" if opt["severity"] == 0 else f" — approved exception ({opt['severity']} points)")}
+        _record(s, new, ev)
+    return {"plan_id": new.id, "valid": new.validation.get("valid"), "status": new.validation.get("status")}
+
+
+@app.post("/api/plans/{pid}/autofix")
+def autofix_plan(pid: str, deep_s: float = 45.0, budget_s: float = 120.0) -> dict:
+    s, p = _current_plan(pid)
+
+    def work(job: dict) -> dict:
+        with s.lock:
+            new, summary = autofix(s.world, p, progress=job["progress"].append, deep_s=deep_s, budget_s=budget_s)
+            if new is not p:
+                ev = {"type": "autofix", "plan_id": new.id, "before_plan_id": p.id, "summary_facts": summary,
+                      "summary": f"Auto-fix within rules: {summary['net_planned_gain']} more visit(s) planned, "
+                                 f"{summary['unplanned_after']} still unplanned."}
+                _record(s, new, ev)
+            return {"plan_id": new.id, "changed": new is not p, **summary}
+
+    return submit("autofix", work)
+
+
+@app.post("/api/scenarios/{sid}/live")
+def start_live(sid: str, body: LiveIn) -> dict:
+    """Run the day live: random (seeded) events, each re-planned at once."""
+    s = _session(sid)
+    if s.current is None:
+        raise HTTPException(400, "optimise a plan first")
+    if body.end <= body.start:
+        raise HTTPException(400, "end must be after start")
+
+    def work(job: dict) -> dict:
+        job["feed"] = []
+        job["clock"] = body.start
+        job["cancel"] = False
+
+        def on_event(entry: dict, plan: Plan) -> None:
+            ev = {"type": "live", "plan_id": plan.id, "before_plan_id": entry["before_plan_id"],
+                  "incident": entry["incident"], "summary": entry["summary"], "label": entry["label"]}
+            _record(s, plan, ev)
+            job["feed"].append(entry)
+            job["latest_plan_id"] = plan.id
+            job["progress"].append(f"{entry['clock_text']} {entry['label']}")
+
+        with s.lock:
+            start = s.current
+            cur, feed = run_live(
+                s.world, start, body.start, body.end, body.events, body.seed, body.pace_s,
+                on_event=on_event, should_stop=lambda: job.get("cancel", False),
+                on_clock=lambda c: job.__setitem__("clock", c),
+            )
+        return {"plan_id": cur.id, "events": len(feed), "feed": feed,
+                "unplanned": len(cur.unplanned), "valid": cur.validation.get("valid"),
+                "interventions_planned_share": cur.score.get("interventions_planned_share")}
+
+    return submit("live", work)
+
+
+def _ml_payload() -> dict:
+    sel = selector(ML_STORE)
+    cases = sel.cases()
+    kinds: dict[str, int] = {}
+    for c in cases:
+        kinds[c["incident"]["kind"]] = kinds.get(c["incident"]["kind"], 0) + 1
+    return {
+        "model": sel.info,
+        "cases_total": len(cases),
+        "cases_by_kind": kinds,
+        "cases_from_app": sum(1 for c in cases if c["source"].startswith("app:")),
+        "recent": [{"source": c["source"], "incident": c["incident"], "best": c["best"],
+                    "scores": {a: o["score"] for a, o in c["outcomes"].items()}} for c in cases[-12:]][::-1],
+        "store": str(ML_STORE),
+    }
+
+
+@app.get("/api/ml")
+def ml_status() -> dict:
+    return _ml_payload()
+
+
+@app.post("/api/ml/train")
+def ml_train() -> dict:
+    def work(job: dict) -> dict:
+        job["progress"].append("training and cross-validating")
+        selector(ML_STORE).train(evaluate_cv=True)
+        return _ml_payload()
+
+    return submit("ml-train", work)
+
+
+@app.post("/api/scenarios/{sid}/ml/cases")
+def ml_generate(sid: str, n: int = 4, seed: int = 1) -> dict:
+    """Generate n new cases on this scenario's current plan (every action is run
+    on a clone of the world, so the session itself is not changed), then retrain."""
+    s = _session(sid)
+    if s.current is None:
+        raise HTTPException(400, "optimise a plan first")
+    n = max(1, min(int(n), 20))
+
+    def work(job: dict) -> dict:
+        with s.lock:
+            world, plan = clone_world(s.world), s.current
+        cases = generate_cases(world, plan, n, seed, f"app:{sid}", progress=job["progress"].append)
+        sel = selector(ML_STORE)
+        sel.add_cases(cases)
+        job["progress"].append("retraining and cross-validating")
+        sel.train(evaluate_cv=True)
+        return {"added": len(cases), **_ml_payload()}
+
+    return submit("ml-cases", work)
+
+
+@app.post("/api/jobs/{jid}/cancel")
+def cancel_job(jid: str) -> dict:
+    job = JOBS.get(jid)
+    if job is None:
+        raise HTTPException(404, "unknown job")
+    job["cancel"] = True
+    return {"job_id": jid, "cancel": True}
+
+
 @app.get("/api/scenarios/{sid}/history")
 def history(sid: str) -> list[dict]:
     return _session(sid).history
@@ -566,4 +771,9 @@ if FRONTEND.exists():
     @app.get("/")
     def index() -> FileResponse:
         return FileResponse(FRONTEND / "index.html")
+
+    @app.get("/documentation")
+    def documentation() -> FileResponse:
+        """System documentation: architecture, engine, rules, AI and ML, operations."""
+        return FileResponse(FRONTEND / "docs.html")
 

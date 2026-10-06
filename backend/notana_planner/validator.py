@@ -68,6 +68,12 @@ class ValidationReport:
         }
 
 
+@dataclass(slots=True)
+class _Rest:
+    start: int
+    end: int
+
+
 def _count_codes(items: list[ValidationIssue]) -> dict[str, int]:
     out: dict[str, int] = {}
     for i in items:
@@ -283,7 +289,18 @@ def validate_plan(
         rules = scenario.rules
         if rules.enabled and stops and route.route_start is not None:
             day_end = route.route_end if route.route_end is not None else max(s.end for s in stops)
-            rests = [s for s in stops if s.kind in ("break", "unavailable") and s.end - s.start >= 30]
+            # Rests: breaks in the route plus the employee's own unpaid gaps (a split-shift
+            # gap is a rest even when a re-plan started after it began and no stop shows it).
+            spans = [(s.start, s.end) for s in stops if s.kind in ("break", "unavailable") and s.end - s.start >= 30]
+            spans += [(max(iv.start, route.route_start), min(iv.end, day_end)) for iv in emp.unavailable
+                      if iv.end - iv.start >= 30 and iv.start < day_end and iv.end > route.route_start]
+            merged: list[list[int]] = []
+            for a, b in sorted(x for x in spans if x[1] > x[0]):
+                if merged and a <= merged[-1][1]:
+                    merged[-1][1] = max(merged[-1][1], b)
+                else:
+                    merged.append([a, b])
+            rests = [_Rest(a, b) for a, b in merged]
             seg_start, worked = route.route_start, 0
             for s in rests + [None]:
                 seg_end = s.start if s is not None else day_end

@@ -11,6 +11,18 @@ class DeterministicAdvisor(PlanningAdvisor):
     name = "deterministic"
 
     def suggest_repair_strategy(self, context: dict[str, Any]) -> AdvisorDecision:
+        sim = context.get("similar_cases") or []
+        if len(sim) >= 3:
+            # Case-based reasoning: the action with the best mean measured score on the
+            # most similar past cases (ties -> the default local escalation).
+            acts = list(sim[0]["scores"])
+            mean = {a: sum(c["scores"][a] for c in sim) / len(sim) for a in acts}
+            best = min(acts, key=lambda a: (round(mean[a], 6), a != "local"))
+            p = {"local": {}, "local_enhanced": {"enhanced_repair": True}, "expanded": {"start_phase": 2},
+                 "broad": {"start_phase": 3}}.get(best, {})
+            why = (f"case-based: on the {len(sim)} most similar past cases '{best}' had the best mean score "
+                   + ", ".join(f"{a} {mean[a]:.0f}" for a in acts))
+            return AdvisorDecision(clamp_params(dict(p)), why, "deterministic (case-based)")
         kind = context.get("incident_kind")
         released = int(context.get("released_visits", 0))
         affected = int(context.get("affected_employees", 0))

@@ -17,6 +17,7 @@
       <span id="b-travel" class="badge muted" title="Active travel-time source">travel: –</span>
       <span id="b-llm" class="badge muted" title="Optional planning advisor">advisor: –</span>
       <span id="b-valid" class="badge muted" title="Independent validator result">not validated</span>
+      <a class="badge" href="/documentation" target="_blank" rel="noopener" title="How the system works: architecture, engine, rules, AI and machine learning">Documentation</a>
       <span id="b-job" class="badge job hidden"><span class="spinner"></span><span id="b-job-text">working…</span></span>
     </div>
   </header>
@@ -66,6 +67,8 @@
             <option value="employee_delayed">Employee delayed</option>
             <option value="extra_staff">Extra pool staff</option>
             <option value="visit_cancelled">Visit cancelled</option>
+            <option value="child_sick">Child sick – employee must pick up child (VAB)</option>
+            <option value="alarm">Safety alarm (trygghetslarm) – fastest employee goes</option>
           </select></label>
           <div id="incident-fields"></div>
           <label>Re-plan strategy <select name="strategy" id="sel-strategy2"></select></label>
@@ -88,8 +91,10 @@
         <button data-tab="conflicts">Unplanned / conflicts <span id="t-conf" class="count"></span></button>
         <button data-tab="replan">Re-planning</button>
         <button data-tab="score">Score &amp; validation</button>
+        <button data-tab="live">Live <span id="t-live" class="count"></span></button>
         <button data-tab="week" id="tab-btn-week" class="hidden">Week</button>
         <button data-tab="experiments">Experiments</button>
+        <button data-tab="ml">Machine learning</button>
       </nav>
       <section class="tab" id="tab-map">
         <div class="toolbar">
@@ -125,6 +130,28 @@
       <section class="tab hidden" id="tab-replan"><div id="replan"></div></section>
       <section class="tab hidden" id="tab-score"><div id="score"></div></section>
       <section class="tab hidden" id="tab-week"><div id="week"></div></section>
+      <section class="tab hidden" id="tab-ml">
+        <div class="actions">
+          <label>Cases <input id="ml-n" type="number" value="4" min="1" max="20" style="width:70px" /></label>
+          <button class="primary" id="btn-ml-cases" disabled>Generate cases on this scenario &amp; retrain</button>
+          <button id="btn-ml-train">Retrain &amp; evaluate</button>
+        </div>
+        <div id="ml"><div class="empty">Loading…</div></div>
+      </section>
+      <section class="tab hidden" id="tab-live">
+        <form id="f-live" onsubmit="return false" class="form inline">
+          <label>From <input name="start" type="time" value="07:30" /></label>
+          <label>To <input name="end" type="time" value="20:00" /></label>
+          <label>Events <input name="events" type="number" value="8" min="1" max="40" /></label>
+          <label>Pace (s between events) <input name="pace_s" type="number" value="1.5" min="0" max="10" step="0.5" /></label>
+          <label>Seed <input name="seed" type="number" value="7" /></label>
+          <button class="primary" type="submit" id="btn-live" disabled>Start live day</button>
+          <button type="button" id="btn-live-stop" disabled>Stop</button>
+          <p class="hint">The clock runs through the day. Safety alarms, sick children (VAB), delays, traffic, sickness, cancellations and moved medication arrive at random (seeded) times. Each one is re-planned at once with local repair and checked by the independent validator; new unplanned visits get their best suggestion.</p>
+        </form>
+        <div class="live-head"><div class="live-clock" id="live-clock">--:--</div><div id="live-stats" class="hint"></div></div>
+        <div id="live-feed" class="feed"><div class="empty">Optimise a plan, then start the live day.</div></div>
+      </section>
       <section class="tab hidden" id="tab-experiments">
         <form id="f-exp" onsubmit="return false" class="form inline">
           <label>Seed <input name="seed" type="number" value="42" /></label>
@@ -136,6 +163,7 @@
             <label class="check"><input type="checkbox" name="s" value="enhanced" checked /> B enhanced repair</label>
             <label class="check"><input type="checkbox" name="s" value="advisor" checked /> C advisor</label>
             <label class="check"><input type="checkbox" name="s" value="classifier" checked /> D classifier</label>
+            <label class="check"><input type="checkbox" name="s" value="learned" checked /> E learned (ML)</label>
           </fieldset>
           <button class="primary" type="submit">Run experiment</button>
           <p class="hint">Same seed, visits, employees, travel matrix, baseline plan and incident sequence (2 sick at 10:14, traffic in Södermalm, a delay, a medication move) for every strategy. Takes a few minutes.</p>

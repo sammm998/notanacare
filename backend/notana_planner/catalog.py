@@ -89,6 +89,8 @@ INTERVENTION_TYPES: tuple[InterventionType, ...] = (
     InterventionType("undressing", "Undressing", 4, 6, 3, (E,)),
     InterventionType("bedtime", "Bedtime assistance", 4, 8, 3, (E,)),
     InterventionType("evening_routine", "Evening routine / tidying", 4, 6, 2, (E,)),
+    # Not generated as planned demand: created by live incidents.
+    InterventionType("alarm_response", "Safety alarm response (trygghetslarm)", 15, 30, 5, ()),
 )
 
 INTERVENTION_BY_KEY = {t.key: t for t in INTERVENTION_TYPES}

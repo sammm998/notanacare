@@ -38,6 +38,8 @@ HORIZON = 2 * 24 * 60
 # in which case the plan reports the conflict / the validator flags it.
 PINNED_PENALTY = 10**11
 BREAK_PENALTY = 10**12
+# Assignment costs as C++ unary vectors (fast) instead of Python callbacks.
+UNARY_ASSIGN = os.environ.get("NOTANA_ASSIGN_CALLBACK", "unary") != "python"
 _DEBUG = bool(os.environ.get("NOTANA_DEBUG"))
 
 
@@ -141,7 +143,11 @@ class RoutingSolver:
                     continue
                 trow = [0 if j in free_in else ri[li[j]] for j in range(N)]
                 time_m.append([svc + x for x in trow])
-                cost_m.append([w.travel_minute * trow[j] + int(w.travel_km * kri[li[j]]) for j in range(N)])
+                thr = w.long_leg_threshold_min
+                cost_m.append([
+                    w.travel_minute * trow[j] + int(w.travel_km * kri[li[j]]) + w.long_leg_minute * max(0, trow[j] - thr)
+                    for j in range(N)
+                ])
             time_cb = routing.RegisterTransitMatrix(time_m)
             cost_cb = routing.RegisterTransitMatrix(cost_m)
             for vi in members:
@@ -186,9 +192,12 @@ class RoutingSolver:
                 if t is not None and not t.pinned:  # pinned: vehicle fixed, cost constant
                     vec[n] = assignment_penalty(p, t, v.employee_id)
             max_pen = max(max_pen, sum(vec))
-            pen_cbs.append(
-                routing.RegisterTransitCallback(lambda i, j, vec=vec: vec[manager.IndexToNode(i)])
-            )
+            if UNARY_ASSIGN:
+                pen_cbs.append(routing.RegisterUnaryTransitVector(vec))
+            else:
+                pen_cbs.append(
+                    routing.RegisterTransitCallback(lambda i, j, vec=vec: vec[manager.IndexToNode(i)])
+                )
         routing.AddDimensionWithVehicleTransits(pen_cbs, 0, max_pen + 1, True, "Assign")
         routing.GetDimensionOrDie("Assign").SetSpanCostCoefficientForAllVehicles(1)
 

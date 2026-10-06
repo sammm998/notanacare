@@ -28,6 +28,8 @@ def assignment_penalty(problem: PlanningProblem, task: Task, employee_id: str) -
         pen += w.language_wish_mismatch
     if emp.preferred_zones and r.zone not in emp.preferred_zones:
         pen += w.outside_preferred_zone
+    if w.outside_team_zone and r.zone != emp.team:
+        pen += w.outside_team_zone
     if task.previous_employees and employee_id not in task.previous_employees:
         pen += w.employee_change
         if any(e in problem.unaffected_employees for e in task.previous_employees):

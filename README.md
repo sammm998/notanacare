@@ -35,7 +35,7 @@ python -m uvicorn notana_planner.api:app --port 8000    # open http://localhost:
 6. Week scenarios: pick a day in the **Week** bar, or **Optimise whole week**; the **Week** tab shows
    every day, hours per employee and the cross-day rules (dygnsvila, veckovila, weekly hours).
 
-Headless: `python demo.py --sick 2 --clock 10:14` · Tests: `python -m pytest` (53 tests, ≈10 min).
+Headless: `python demo.py --sick 2 --clock 10:14` · Tests: `python -m pytest` (64 test functions, ≈20 min).
 
 Optional environment (see `.env.example`, never commit keys):
 
@@ -95,16 +95,25 @@ frontend/            no-build ES modules: map (vendored Leaflet), Gantt, panels
 1. **Construction** – exact single-route time-window insertion (forward/backward passes).
    Double-staffed visits are inserted as **pairs**: two different qualified employees whose
    feasible start intervals intersect, fixed at the same start in both routes.
-2. **OR-Tools routing** (guided local search, warm-started from 1). Employees are vehicles with
-   their own start/end, every role of every visit is a node, and pairs are pinned.
-3. **Repair insertion** of leftovers with exact feasibility checks.
-4. **Enhanced repair** (strategy B+): ejection chains. Remove a blocking visit, insert the
+2. **Ruin-and-recreate LNS** (`solver/ruin_recreate.py`, 75 % of the time budget): remove a
+   geographic cluster, a string of one route or the visits reached by the longest trips, re-insert
+   them (plus unplanned visits nearby) with the same exact checks, keep the result if the cost is
+   lower (threshold acceptance). Cost = unplanned penalties + travel + long-trip penalty
+   (150/min beyond 15 min) + continuity, wishes and area costs.
+   *Why:* measured on the full day, OR-Tools' local search evaluated ~15 moves/s and found **no**
+   improving solution in 25 s (≈10,000 cross-route constraints). With the LNS the default day goes
+   from 22 to 5–8 unplanned visits and 90 % of trips are ≤ 15–17 min.
+3. **OR-Tools routing** (guided local search, warm-started from 2, rest of the budget). Employees are
+   vehicles with their own start/end and travel matrix (car / bike), every role of every visit is a node,
+   and pairs are pinned.
+4. **Repair insertion** of leftovers with exact feasibility checks.
+5. **Enhanced repair** (strategy B+): ejection chains. Remove a blocking visit, insert the
    unplanned one and re-insert the blocker elsewhere. A lower-priority visit is displaced only for
    a strictly higher-priority one, and that is recorded.
-5. **CP-SAT timetabling**: given the sequences, exact start times for all visits and breaks with
+6. **CP-SAT timetabling**: given the sequences, exact start times for all visits and breaks with
    global double-staffing synchronisation, recipient non-overlap and soft time preferences
    (solved to optimality, typically 0.1 s).
-6. **Gap fill** at fixed times, then **independent validation**, **diagnostics** and **scoring**.
+7. **Gap fill** at fixed times, then **independent validation**, **diagnostics** and **scoring**.
 
 ### Hard constraints and where they are enforced
 
@@ -136,6 +145,61 @@ share) · overtime · idle span · **wishes**: non-strict gender wish, preferred
 preferred area · **re-planning stability**: employee change, change of communicated
 start time, touching an unaffected route, dropping an already-communicated visit. The **Score**
 tab recomputes every term from the plan, so you can see *why* one plan beats another.
+
+### Unplanned visits: solutions, ranked (`suggestions.py`)
+
+The Unplanned tab shows interventions planned / unplanned (count and share of the ~5,000) and, on
+request, options for **every** unplanned visit, sorted by severity (least first):
+
+* **Within rules** (0 points): a real re-optimisation of the 5–6 nearest qualified routes together;
+  kept only if the visit is placed, no other planned visit is lost and the validator says VALID.
+* **Deviations**: the visit inserted into one route (two for double staffing) at every position, later
+  stops pushed; every consequence is priced: start outside the window (1/min, 8/min if time-critical),
+  pushed visits, overtime (2/min), meal break moved (2/min), more than 5 h without a rest (4/min),
+  work in an unpaid gap, desynchronised double staffing (300), wishes (10–400), pet allergy (800),
+  missing skill (600), missing delegation (2000, *not permitted*), single staffing of a double visit (1500).
+* **Extra resource**: pool staff with the visit's qualifications for the zone and window.
+
+Applying a deviation creates a plan with an **approved exception**: the validator still reports every
+violation, listed as approved (`VALID_WITH_APPROVED_EXCEPTIONS`); without the approval the same plan is
+INVALID. **Auto-fix within rules** first re-optimises all open visits (warm start, 45 s) and then
+re-plans the nearest routes per remaining visit; it reports the net number of visits gained.
+
+### Live day (`live.py`) and new incidents
+
+*Live* runs the clock through the day; seeded random events arrive and are re-planned at once
+(local repair, 3–5 s): **safety alarm** (trygghetslarm: a new urgent visit; the employee who can be
+on site first is dispatched, accounting for where they are and the visit they are finishing; their
+other visits are re-planned; if their day cannot absorb it the next fastest goes), **child sick**
+(VAB: the employee finishes the visit in progress and leaves, for the rest of the day or 2–3 h),
+delays, traffic, sickness, cancellations and moved medication. The feed shows each event, who was
+dispatched and how fast, what changed, what became unplanned and its best option. Every plan is validated.
+
+### Machine learning: a strategy selector trained on simulated cases (`ml/`)
+
+What is learned: **which re-planning strategy works best for an incident**. A training case is a
+simulated incident (alarm, VAB, delay, traffic, sickness, cancellation, moved medication) at a random
+time on a planned day of a random scenario. **All four strategies run on the same case** (counterfactual,
+world cloned per action): `local` (default escalation), `local_enhanced`, `expanded`, `broad`. Each
+outcome is scored: `1000·lost high-priority + 100·lost + 20·extra unplanned + visits changed + 0.5·s`
+(invalid plan = 1e6). Features are known before re-planning (incident kind, clock, released visits and
+their priority / double staffing / hard windows / care minutes, affected employees, remaining care vs
+remaining staff time, unplanned before, traffic). One gradient-boosted regressor (scikit-learn) per
+strategy predicts the score; **strategy E** takes the lowest prediction. The model is retrained from the
+case data at start-up and on request (no pickled model to drift out of sync with the library).
+
+Evaluation is 5-fold cross-validation (scored only on unseen cases) against "always default" and the
+oracle; the *Machine learning* tab shows it, including when the model is not better. New cases can be
+generated in the app on the current scenario (session untouched) and the model retrained. Strategy C's
+advisor gets the most similar cases with their measured outcomes (Claude in its facts; the
+deterministic fallback votes by mean score, case-based reasoning). Simulated cases are bundled in
+`ml/data/replan_cases.jsonl` (generated with `python train_ml.py --seeds 1-28 --per-seed 6`).
+
+### Documentation page
+
+`/documentation` (link in the header) explains architecture, every module, the engine, rules, wishes,
+Arbetstidslagen, week planning, suggestions, the live day, AI and ML, travel, API, operations and the
+measured numbers.
 
 ### Wishes and person attributes
 
@@ -219,23 +283,22 @@ API key is set, and notes that a single seed is indicative rather than statistic
 
 ### Measured result (default scenario, seed 42, no API key)
 
-Baseline day plan: **565 / 587 visits planned, 22 unplanned (each explained), VALID** (wishes and
-Arbetstidslagen on). Incident chain: 2 employees sick at 10:14 → Södermalm traffic ×1.6 at 10:34 → a
-25-min delay at 10:44 → a medication moved at 10:54.
+Baseline day plan: **582 / 587 visits planned, VALID** (wishes, Arbetstidslagen and LNS on). Incident
+chain: 2 employees sick at 10:14 → Södermalm traffic ×1.6 at 10:34 → a 25-min delay at 10:44 → a
+medication moved at 10:54.
 
-| Strategy | Unplanned at end | Lost vs base plan | Hard violations | Travel (min) | Changed assignments | Changed start times | Re-plan runtime |
-|---|---|---|---|---|---|---|---|
-| A. Baseline optimizer | 39 | 20 | 0 | 8,602 | 68 | 115 | 120 s |
-| B. + enhanced repair | 38 | 20 | 0 | 8,686 | 62 | 120 | 60 s |
-| C. + advisor (deterministic fallback) | 30 | 17 | 0 | 8,859 | 107 | 189 | 57 s |
-| D. + mock classifier ranking | 29 | 15 | 0 | 8,811 | 80 | 147 | 100 s |
+| Strategy | Unplanned at end | Lost vs base plan | Hard violations | Travel (min) | Changed assignments | Re-plan runtime |
+|---|---|---|---|---|---|---|
+| A. Baseline optimizer | 17 | 15 | 0 | 8,359 | 84 | 112 s |
+| B. + enhanced repair | 19 | 14 | 0 | 7,945 | 71 | 112 s |
+| C. + advisor (deterministic, case-based) | 16 | 14 | 0 | 8,372 | 84 | 95 s |
+| D. + mock classifier ranking | 14 | 10 | 0 | 8,202 | 96 | 111 s |
+| E. + learned selector (ML) | 14 | 12 | 0 | 8,203 | 103 | 109 s |
 
-Reading it honestly: two sick employees in a tight day cost 15–20 communicated visits in every
-strategy, mostly double-staffed visits whose partner cannot be replaced. **C** and **D** keep 8–10 more
-visits planned than A, at the cost of more travel and many more changed assignments. Neither used an
-LLM or a trained model here: C ran the deterministic advisor (it chose a broader repair) and D the
-transparent mock ranking. This is one seed, so nothing here shows that an AI component helps. The mode
-exists to measure exactly that once a real LLM/JEV component is attached.
+Reading it honestly: on this one chain D and E end with the fewest unplanned visits, at the cost of
+more changed assignments. One seed shows nothing statistically; the 96-case nested cross-validation
+(see Machine learning) is the measure that counts, and there E does not beat the default yet. No LLM was
+involved (no API key).
 
 ---
 
@@ -245,12 +308,18 @@ exists to measure exactly that once a real LLM/JEV component is attached.
   employees) implies ≈ 5 h of care per employee per day, so it is **inherently tight**. Defaults use
   Swedish home-care shift templates that comply with Arbetstidslagen (early, late, *delad tur*
   07:30–12:00 + 16:30–20:30, part-time) with meal breaks between demand peaks.
-* With the defaults (pressure 0.15, wishes on), one day leaves **4–8 % of visits unplanned**
-  depending on the seed (seed 42: 22 of 587; seed 43: 35; seed 44: 47), each with a structured reason
-  and every plan VALID. Arbetstidslagen costs the most capacity (shorter split shift, no stretch over
-  5 h); bike staff and hard wishes cost another 7–15 visits a day. A full default week (35,253
-  interventions, 4,167 visits, 140 employees) plans 3,805 visits (91 %) in about 3 minutes, all
-  seven days VALID and the week rules met. Raise *staffing pressure* or remove employees to see real
+* With the defaults (pressure 0.15, wishes and Arbetstidslagen on) one day plans **96.3–98.7 % of
+  the ~5,000 interventions** (seed 42: 4,935 of 5,002, 8 unplanned visits; seed 43: 97.5 %, 14;
+  seed 44: 96.3 %, 21), every plan VALID; median trip 7 min, 90 % of trips ≤ 15–18 min. Before the LNS
+  the same day left 22 visits unplanned (seed 42). A full default week (35,253 interventions, 4,167
+  visits, 140 employees) plans 33,544 interventions (95.2 %) in about 3 minutes, all seven days VALID
+  and the week rules met. An understaffed day (1,516 interventions, 24 employees) plans 74.5 %; every
+  unplanned visit gets ranked options (best: minor deviation 14, pool staff 20, major 10) and
+  auto-fix within the rules reaches 76.2 %.
+* Machine learning, measured honestly: on 96 simulated cases (nested 5-fold CV) the learned selector
+  scores 375 vs 365 for the default and 354 for the oracle, i.e. it does **not** beat the default yet
+  (the default is within 3 % of the oracle). More and more varied cases are needed; the app can
+  generate them. Raise *staffing pressure* or remove employees to see real
   capacity problems, or add *extra pool staff* to see them resolved. The engine never shortens care
   and never hides a shortage.
 * Unplanned diagnostics are evaluated **without moving other visits**. *"No opening"* means none
@@ -275,4 +344,7 @@ exists to measure exactly that once a real LLM/JEV component is attached.
 `POST /api/scenarios/{id}/incidents` → job · `POST /api/plans/{id}/validate` ·
 `POST /api/scenarios/{id}/visits/{vid}/lock` · `POST /api/experiments` → job ·
 `GET /api/scenarios/{id}/export` · `GET /api/weeks/{id}` (week summary + week validation) ·
-`POST /api/weeks/{id}/plan` → job · OpenAPI docs at `/docs`.
+`POST /api/weeks/{id}/plan` → job · `POST /api/plans/{id}/suggestions` → job ·
+`POST /api/plans/{id}/suggestions/{option}/apply` · `POST /api/plans/{id}/autofix` → job ·
+`GET /api/ml` · `POST /api/ml/train` → job · `POST /api/scenarios/{id}/ml/cases?n=4` → job ·
+`POST /api/scenarios/{id}/live` → job (feed in the job) · `POST /api/jobs/{id}/cancel` · OpenAPI docs at `/docs`.

@@ -60,6 +60,10 @@ class SolveOptions:
     # Warm-start routing from a full insertion construction (True) or let
     # OR-Tools build the first solution itself (False, LOCAL_CHEAPEST_INSERTION).
     construct_singles: bool = True
+    # Share of the time budget for ruin-and-recreate on the insertion routes
+    # (the rest goes to OR-Tools routing, warm-started from the LNS result).
+    lns_share: float = 0.75
+    seed: int = 0
 
 
 def _stop_for(task: Task, role: int, fixed: int | None) -> Stop:
@@ -102,10 +106,21 @@ def _routes_from_hint(
         cur: list[Stop] = []
         for start, st in cand_stops:
             trial = cur + [st]
-            if st.kind == "break" or forward(trial, r.vehicle, problem.travel) is not None:
+            if st.kind == "break":
+                # Breaks / unpaid gaps are mandatory: if the hinted visits before it
+                # now run too late, release the latest of them until it fits.
+                while forward(trial, r.vehicle, problem.travel) is None:
+                    k = next((i for i in range(len(cur) - 1, -1, -1) if cur[i].kind == "visit"
+                              and not (tasks[cur[i].visit_id].pinned and cur[i].role in tasks[cur[i].visit_id].pinned)), None)
+                    if k is None:
+                        break
+                    gone = cur.pop(k)
+                    placed.get(gone.visit_id, {}).pop(gone.role, None)  # type: ignore[arg-type]
+                    trial = cur + [st]
                 cur = trial
-                if st.kind == "visit":
-                    placed.setdefault(st.visit_id, {})[st.role] = (eid, start)  # type: ignore[index]
+            elif forward(trial, r.vehicle, problem.travel) is not None:
+                cur = trial
+                placed.setdefault(st.visit_id, {})[st.role] = (eid, start)  # type: ignore[index]
         r.stops = cur
     reinsert: list[Task] = []
     for vid, t in tasks.items():
@@ -152,6 +167,13 @@ class SolveEngine:
             "singles_failed": len(failed_singles),
             "seconds": round(time.perf_counter() - t0, 2),
         }
+
+        # ---- 1b. ruin-and-recreate LNS ---------------------------------------
+        if self.opt.lns_share > 0 and self.opt.construct_singles:
+            from .ruin_recreate import improve
+
+            budget = (self.opt.time_limit_s - (time.perf_counter() - t0)) * self.opt.lns_share
+            stats["ruin_recreate"] = improve(p, ctor, budget, seed=self.opt.seed)
 
         # ---- 2. OR-Tools routing -------------------------------------------
         rp = copy.copy(p)
@@ -267,7 +289,20 @@ class SolveEngine:
             # are fixed there, so synchronisation still holds).
             stats["timetabling"] = {"status": tt.status if tt else "disabled", "fallback": "earliest-start"}
             for eid, r in repair.routes.items():
-                starts = forward(r.stops, r.vehicle, p.travel) or [s.earliest for s in r.stops]
+                starts = forward(r.stops, r.vehicle, p.travel)
+                while starts is None and any(s.kind == "visit" and not (tasks[s.visit_id].pinned and s.role in tasks[s.visit_id].pinned)
+                                             for s in r.stops):
+                    # Never emit overlapping times: release the latest movable visit
+                    # (and its partner role) until the route is feasible again.
+                    k = max(i for i, s in enumerate(r.stops) if s.kind == "visit"
+                            and not (tasks[s.visit_id].pinned and s.role in tasks[s.visit_id].pinned))
+                    vid = r.stops[k].visit_id
+                    for rr2 in repair.routes.values():
+                        rr2.stops = [s for s in rr2.stops if s.visit_id != vid]
+                    unplanned.add(vid)  # type: ignore[arg-type]
+                    stats.setdefault("released_infeasible", []).append(vid)
+                    starts = forward(r.stops, r.vehicle, p.travel)
+                starts = starts or [s.earliest for s in r.stops]
                 out_routes[eid] = [
                     SolvedStop(s.kind, s.visit_id, s.role, s.location, s.duration, st, s.free_arrival)
                     for s, st in zip(r.stops, starts)

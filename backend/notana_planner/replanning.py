@@ -95,7 +95,9 @@ def _employee_state(world: World, plan: Plan, eid: str, prefix: list[RouteStop],
         last = max(prefix, key=lambda s: s.end)
         loc = last.location_id
         ready = max(clock, last.end)
-    if emp.current_location_id and emp.available_from is not None:
+    # A delay pins the employee where they were when it happened -- but only until
+    # they have started something newer (several incidents in one day).
+    if emp.current_location_id and emp.available_from is not None and (not prefix or max(s.end for s in prefix) <= emp.available_from):
         loc = emp.current_location_id
     n_taken = sum(1 for s in prefix if s.kind == "break")
     v = vehicle_for(
@@ -108,6 +110,10 @@ def _employee_state(world: World, plan: Plan, eid: str, prefix: list[RouteStop],
         rules=world.scenario.rules,
     )
     rules = world.scenario.rules
+    if v is not None and prefix and v.start_time + v.travel.minutes(v.start_location, v.end_location) > v.end_time:
+        # Nothing more can be done before the shift ends (the employee has long since
+        # headed back): keep the finished work as it is and leave them out of the problem.
+        return None
     if v is not None and n_taken and rules.enabled:
         # ATL: the stretch after the break actually taken is at most 5 h.
         taken_end = max(s.end for s in prefix if s.kind == "break")
@@ -115,10 +121,17 @@ def _employee_state(world: World, plan: Plan, eid: str, prefix: list[RouteStop],
             v.end_time = max(v.start_time, min(v.end_time, taken_end + rules.max_continuous_work_min))
     if v is not None:
         # A meal break must stay reachable: leave at least the travel time to the office.
+        # If going back would break the 5-hour rule (ATL), the break is taken on the spot.
         reach = v.start_time + v.travel.minutes(v.start_location, v.break_location or v.start_location)
+        atl_latest = emp.shift_start + rules.max_continuous_work_min if rules.enabled else None
         for b in v.breaks:
             if b.kind == "break" and b.latest_start < reach:
-                b.latest_start = reach
+                if atl_latest is not None and reach > atl_latest and v.start_time <= atl_latest:
+                    v.break_location = v.start_location
+                    b.earliest_start = min(b.earliest_start, v.start_time)
+                    b.latest_start = max(v.start_time, min(b.latest_start, atl_latest))
+                else:
+                    b.latest_start = reach
     return v
 
 
@@ -225,7 +238,11 @@ def build_repair_problem(
             # Previously unplanned (or new) visit: try it, since the incident can free
             # capacity too (e.g. the partner of a released double-staffed visit).
             # It is never counted as "lost" and only lands on employees in the problem.
-            add_task(vid)
+            pin = (effect.facts.get("pin") or {}).get(vid)
+            if pin and pin[0] in vehicle_ids:
+                add_task(vid, pinned_roles={0: (pin[0], int(pin[1]))})  # e.g. alarm: dispatched employee
+            else:
+                add_task(vid)
             continue
         if not inside and vid not in released:
             continue  # untouched route keeps it
@@ -254,12 +271,19 @@ def build_repair_problem(
         rid = sc.visits[vid].recipient_id
         busy.setdefault(rid, []).append((a.start, a.end))
 
-    # Warm start: previous future sequence of every vehicle.
+    # Warm start: previous future sequence of every vehicle. Visits that would
+    # collide with a pinned new visit (e.g. a dispatched alarm) are left out of
+    # the hint so the pin can be placed first; they are re-inserted normally.
+    pins = {p[0]: (int(p[1]), sc.visits[k].total_duration_minutes)
+            for k, p in (effect.facts.get("pin") or {}).items() if k in sc.visits}
     hint: dict[str, list[tuple[str, int, int]]] = {}
     for v in vehicles:
         r = plan.routes.get(v.employee_id)
         seq = []
+        pin = pins.get(v.employee_id)
         for s in r.stops if r else []:
+            if pin and s.start < pin[0] + pin[1] + 45 and s.end > pin[0] - 45:
+                continue
             if s.kind == "visit" and s.visit_id in task_ids and s.start > clock:
                 t = next(t for t in tasks if t.visit_id == s.visit_id)
                 role = s.role
@@ -315,6 +339,40 @@ def replan(
     exhaustive: bool = False,
     chooser: Any = None,
 ) -> ReplanResult:
+    res = _replan_once(world, plan, effect, params, strategy, exhaustive, chooser)
+    # A safety alarm must be answered: if the fastest responder's day cannot take
+    # it, dispatch the next fastest (the summary says who went and why).
+    alarm = effect.facts.get("alarm_visit")
+    tried = [effect.facts.get("dispatched")]
+    for eid, arrive, doing in (effect.facts.get("responders") or [])[1:]:
+        if not alarm or alarm in res.plan.assignments:
+            break
+        tried.append(eid)
+        effect.facts["pin"] = {alarm: [eid, arrive]}
+        effect.facts.update(dispatched=eid, arrive=arrive, response_minutes=arrive - effect.clock, employee_was=doing)
+        effect.affected_employees |= {eid}
+        effect.released_visits |= {x for x, a in plan.assignments.items()
+                                   if eid in a.employee_ids and a.start > effect.clock}
+        res = _replan_once(world, plan, effect, params, strategy, exhaustive, chooser)
+    if alarm and len(tried) > 1:
+        effect.facts["dispatch_attempts"] = tried
+        effect.description += (f" Re-dispatched to {tried[-1]} (arrives {fmt_time(effect.facts['arrive'])}, "
+                               f"{effect.facts['response_minutes']} min after the alarm).")
+        if alarm in res.plan.assignments:
+            res.summary = (f"Alarm dispatched to {tried[-1]} (arrives {fmt_time(effect.facts['arrive'])}); "
+                           f"{', '.join(tried[:-1])} could not take it without breaking rules.\n") + res.summary
+    return res
+
+
+def _replan_once(
+    world: World,
+    plan: Plan,
+    effect: IncidentEffect,
+    params: RepairParams | None = None,
+    strategy: str = "baseline",
+    exhaustive: bool = False,
+    chooser: Any = None,
+) -> ReplanResult:
     from .explain import plan_diff, replan_summary
 
     params = params or RepairParams()
@@ -351,6 +409,7 @@ def replan(
             clock=clock,
         )
         _role_fix(new_plan, plan, problem)
+        new_plan.exceptions = list(plan.exceptions)  # approvals stay with routes that keep them
         finalize_plan(world, new_plan, reference=plan, clock=clock)
         lost = {
             v
@@ -475,11 +534,40 @@ def replan_with_strategy(
         from .advisor import make_advisor
 
         advisor = advisor or make_advisor()
-        decision = advisor.suggest_repair_strategy(incident_context(world, plan, effect))
+        ctx = incident_context(world, plan, effect)
+        # Case base: measured outcomes of the most similar simulated cases (learning from cases).
+        try:
+            from .ml.cases import ACTIONS
+            from .ml.features import case_features
+            from .ml.model import selector, similar_cases
+
+            sim = similar_cases(case_features(world, plan, effect), selector().cases())
+            if sim:
+                ctx["similar_cases"] = sim
+                ctx["similar_cases_note"] = (
+                    "Measured outcomes (score, lower is better; lost = promised visits lost) of every repair "
+                    f"action on the most similar past cases. Actions: {ACTIONS} (start_phase / enhanced_repair).")
+        except Exception:  # noqa: BLE001 - the case base is optional
+            pass
+        decision = advisor.suggest_repair_strategy(ctx)
         for k, v in decision.params.items():
             setattr(params, k, v)
         params.source = decision.source
         meta["advisor"] = decision.to_dict()
+    if strategy == "learned":
+        from .ml.cases import ACTIONS, action_params
+        from .ml.features import case_features
+        from .ml.model import selector
+
+        feats = case_features(world, plan, effect)
+        pred = selector().predict(feats)
+        if pred is None:
+            meta["learned"] = {"used": False, "note": selector().info.get("note", "model not trained"), "features": feats}
+        else:
+            params = action_params(pred["action"])
+            meta["learned"] = {"used": True, **pred, "features": feats,
+                               "trained_on": selector().info.get("cases"),
+                               "action_meaning": {k: v or "default escalation" for k, v in ACTIONS.items()}}
     if strategy == "classifier":
         from .classifier import Alternative, make_classifier
 

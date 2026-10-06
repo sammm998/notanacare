@@ -21,10 +21,11 @@ from .travel import BaseMatrix, TrafficConditions, TravelMatrix, TravelTimeProvi
 from .validator import validate_plan
 
 STRATEGIES = {
-    "baseline": "A. Baseline deterministic optimizer (construction + OR-Tools GLS + CP-SAT timetabling)",
+    "baseline": "A. Baseline deterministic optimizer (construction + ruin-and-recreate LNS + OR-Tools + CP-SAT)",
     "enhanced": "B. Optimizer + enhanced repair heuristic (ejection chains)",
     "advisor": "C. Optimizer + planning advisor (LLM if configured, else deterministic fallback)",
     "classifier": "D. Optimizer + decision classifier ranking repair alternatives",
+    "learned": "E. Optimizer + learned strategy selector (ML trained on simulated cases)",
 }
 
 
@@ -78,11 +79,32 @@ def finalize_plan(world: World, plan: Plan, reference: Plan | None = None, clock
         clock=clock,
     )
     plan.validation = report.to_dict()
+    if plan.exceptions:
+        _apply_approvals(plan)
     plan.validation["seconds"] = round(time.perf_counter() - t0, 3)
     plan.unplanned = diagnose_unplanned(world.scenario, tm, plan)
     plan.score = score_plan(world.scenario, tm, plan, world.weights, reference)
     plan.travel_source = tm.source
     return plan
+
+
+def _apply_approvals(plan: Plan) -> None:
+    """Violations inside an approved exception's scope stay reported, as
+    approved exceptions; everything else still makes the plan INVALID."""
+    v = plan.validation
+    approved, open_errors = [], []
+    for err in v["errors"]:
+        hit = next((x for x in plan.exceptions
+                    if (err["visit_id"] and err["visit_id"] in x["visits"])
+                    or (err["employee_id"] in x["employees"] and (not err["visit_id"] or err["visit_id"] in x["visits"]))),
+                   None)
+        (approved if hit else open_errors).append(err | ({"approved_for": hit["visit_id"]} if hit else {}))
+    v["errors"] = open_errors
+    v["approved_exceptions"] = approved
+    v["error_count"] = len(open_errors)
+    v["errors_by_code"] = {c: sum(1 for e in open_errors if e["code"] == c) for c in {e["code"] for e in open_errors}}
+    v["valid"] = not open_errors
+    v["status"] = ("VALID" if not approved else "VALID_WITH_APPROVED_EXCEPTIONS") if not open_errors else "INVALID"
 
 
 def plan_day(
