@@ -99,12 +99,17 @@ async function loadInterventions(more) {
 }
 
 // ------------------------------------------------------------------ unplanned solutions
-async function showPlan(pid) {
+async function showPlan(pid, { tab = "map", quiet = false } = {}) {
   try {
     await api("POST", `/api/plans/${pid}/activate`);
     await refreshScenario();
     await loadPlan(pid);
+    switchTab(tab);
     render();
+    if (!quiet) {
+      const c = state.plan.clock;
+      toast(`Visar plan ${pid}${c != null ? ` (kl. ${hhmm(c)})` : ""}: ${Object.keys(state.plan.assignments).length} besök planerade, ${Object.keys(state.plan.unplanned).length} oplanerade. Karta och tidslinje visar nu den planen.`, 7000);
+    }
   } catch (err) {
     handleError(err);
   }
@@ -489,27 +494,45 @@ async function loadVisitRecommendation(vid) {
   let anchor = why || $("#drawer-body").firstElementChild;
   while (anchor?.nextElementSibling && anchor.nextElementSibling.tagName === "P") anchor = anchor.nextElementSibling;
   anchor ? anchor.after(host) : $("#drawer-body").append(host);
-  try {
-    const pid = state.plan.id;
-    const d = await api("POST", `/api/plans/${pid}/visits/${vid}/suggestions`);
-    if (state.selectedVisit !== vid || state.plan?.id !== pid) return;
-    const [best, ...rest] = d.options;
-    const line = (o) => `${o.violations.length ? o.violations.map((x) => esc(x.text)).join(" · ") : "Inga regelbrott"}${o.pushed_visits?.length ? ` · flyttar ${esc(o.pushed_visits.join(", "))}` : ""}${o.kind === "replan" ? ` · ${o.changes} besök ändras i ${o.routes.length} rutter` : ""}`;
-    const label = (o) => o.kind === "pool" ? "Kalla in poolpersonal" : o.severity ? "Acceptera med avsteg" : "Acceptera";
-    host.innerHTML = !best ? `<h4>Rekommenderad lösning</h4><p class="hint">${d.window_closed ? `Inget förslag: besökets tidsfönster stängde kl. ${esc(d.window_closed)} och klockan är nu ${esc(d.clock)}.` : "Ingen lösning hittades."}</p>` : `
-      <h4>Rekommenderad lösning</h4>
+  const line = (o) => `${o.violations.length ? o.violations.map((x) => esc(x.text)).join(" · ") : "Inga regelbrott"}${o.pushed_visits?.length ? ` · flyttar ${esc(o.pushed_visits.join(", "))}` : ""}${o.kind === "replan" ? ` · ${o.changes} besök ändras i ${o.routes.length} rutter` : ""}`;
+  const label = (o) => o.kind === "pool" ? "Kalla in poolpersonal" : o.severity ? "Acceptera med avsteg" : "Acceptera";
+  const options = (opts, prefix = "") => {
+    const [best, ...rest] = opts;
+    return `
       <div class="card rec-best">
         <div><span class="lvl ${best.level}">${LEVEL_SV[best.level] || best.level}</span> <span class="hint">${best.severity} poäng</span></div>
         <div style="margin:6px 0"><b>${esc(best.title)}</b></div>
         <div class="hint">${line(best)}</div>
-        ${best.level === "not_permitted" ? '<p class="hint">Inget tillåtet alternativ: alla lösningar bryter mot patientsäkerheten.</p>' : `<button class="primary" data-opt="${best.id}" style="margin-top:8px">${label(best)}</button>`}
+        ${best.level === "not_permitted" ? '<p class="hint">Inget tillåtet alternativ: alla lösningar bryter mot patientsäkerheten.</p>' : `<button class="primary" data-opt="${best.id}" style="margin-top:8px">${prefix}${label(best)}</button>`}
         ${best.severity && best.kind !== "pool" ? '<div class="hint" style="margin-top:6px">Avsteg registreras som godkänt undantag och fortsätter att rapporteras av validatorn.</div>' : ""}
       </div>
-      ${rest.length ? `<h4>Andra alternativ</h4><div class="sugg">${rest.slice(0, 4).map((o) => `<div class="opt"><span class="lvl ${o.level}">${LEVEL_SV[o.level] || o.level}</span><span class="pts">${o.severity} p</span><b>${esc(o.title)}</b><span class="v">${line(o)}</span>${o.level === "not_permitted" ? '<span class="hint">kan inte accepteras (patientsäkerhet)</span>' : `<button data-opt="${o.id}">${label(o)}</button>`}</div>`).join("")}</div>` : ""}`;
+      ${rest.length ? `<h4>Andra alternativ</h4><div class="sugg">${rest.slice(0, 4).map((o) => `<div class="opt"><span class="lvl ${o.level}">${LEVEL_SV[o.level] || o.level}</span><span class="pts">${o.severity} p</span><b>${esc(o.title)}</b><span class="v">${line(o)}</span>${o.level === "not_permitted" ? '<span class="hint">kan inte accepteras (patientsäkerhet)</span>' : `<button data-opt="${o.id}">${prefix}${label(o)}</button>`}</div>`).join("")}</div>` : ""}`;
+  };
+  try {
+    const pid = state.plan.id;
+    const d = await api("POST", `/api/plans/${pid}/visits/${vid}/suggestions`);
+    if (state.selectedVisit !== vid || state.plan?.id !== pid) return;
+    let opts = d.options;
+    let earlier = null;
+    if (!opts.length && d.earlier?.options?.length) {
+      earlier = d.earlier;
+      opts = earlier.options;
+      host.innerHTML = `<h4>Rekommenderad lösning</h4>
+        <p class="hint">Tidsfönstret stängde kl. ${esc(d.window_closed)} och klockan är nu ${esc(d.clock)}, så besöket kan inte längre läggas in i den här planen.
+        Det var fortfarande lösbart i planversionen <b>${esc(earlier.plan_id)}</b>${earlier.clock ? ` (kl. ${esc(earlier.clock)}, ${esc(earlier.strategy)})` : " (dagens optimering)"}.
+        Acceptera där går tillbaka till den versionen och lägger in besöket; händelserna efter den tidpunkten följer inte med.</p>
+        ${options(opts, "Gå tillbaka och ")}`;
+    } else if (!opts.length) {
+      host.innerHTML = `<h4>Rekommenderad lösning</h4><p class="hint">${d.window_closed ? `Tidsfönstret stängde kl. ${esc(d.window_closed)} och klockan är nu ${esc(d.clock)}. Besöket var oplanerat redan innan händelserna och ingen lösning hittades.` : "Ingen lösning hittades."}</p>`;
+      return;
+    } else {
+      host.innerHTML = `<h4>Rekommenderad lösning</h4>${options(opts)}`;
+    }
     host.querySelectorAll("button[data-opt]").forEach((b) => b.addEventListener("click", async () => {
-      const opt = d.options.find((o) => o.id === b.dataset.opt);
+      const opt = opts.find((o) => o.id === b.dataset.opt);
       b.disabled = true;
       $("#drawer").classList.add("hidden");
+      if (earlier) await showPlan(earlier.plan_id, { tab: state.tab, quiet: true });
       await conflictActions.apply(opt);
     }));
   } catch (err) {

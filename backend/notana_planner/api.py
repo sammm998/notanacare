@@ -641,6 +641,16 @@ def get_suggestions(pid: str) -> dict:
     return _suggestions_payload(pid)
 
 
+def _suggest_one(s: Session, plan: Plan, vid: str) -> list[dict]:
+    """Options for one visit, computed on a copy of the plan's own world, so it does
+    not wait for (or race with) a running live day that holds the session lock."""
+    snap = WORLD_SNAPSHOTS.get(plan.id)
+    if snap is not None:
+        return suggest_for_plan(clone_world(snap), plan, [vid], replan_time_s=2.5).get(vid, [])
+    with s.lock:
+        return suggest_for_plan(s.world, plan, [vid], replan_time_s=2.5).get(vid, [])
+
+
 @app.post("/api/plans/{pid}/visits/{vid}/suggestions")
 def visit_suggestions(pid: str, vid: str) -> dict:
     """Options for one unplanned visit (recommended first), computed on demand."""
@@ -649,11 +659,21 @@ def visit_suggestions(pid: str, vid: str) -> dict:
         raise HTTPException(400, f"{vid} is not unplanned in this plan")
     v = s.world.scenario.visits.get(vid)
     if v is not None and p.clock is not None and v.latest_start < p.clock:
-        return {"plan_id": pid, "visit_id": vid, "options": [],
-                "window_closed": fmt_time(v.latest_start), "clock": fmt_time(p.clock),
-                "reason": f"the time window closed at {fmt_time(v.latest_start)}, before the current clock {fmt_time(p.clock)}"}
-    with s.lock:
-        opts = suggest_for_plan(s.world, p, [vid], replan_time_s=2.5).get(vid, [])
+        # Too late in this plan: find the latest earlier version (same branch) in which the
+        # visit was unplanned while its window was still open, and solve it there.
+        out = {"plan_id": pid, "visit_id": vid, "options": [],
+               "window_closed": fmt_time(v.latest_start), "clock": fmt_time(p.clock),
+               "reason": f"the time window closed at {fmt_time(v.latest_start)}, before the current clock {fmt_time(p.clock)}"}
+        anc = s.plans.get(p.parent_plan_id) if p.parent_plan_id else None
+        while anc is not None and not (vid in anc.unplanned and (anc.clock is None or anc.clock < v.latest_start)):
+            anc = s.plans.get(anc.parent_plan_id) if anc.parent_plan_id else None
+        if anc is not None:
+            opts = _suggest_one(s, anc, vid)
+            SUGGESTIONS.setdefault(anc.id, {})[vid] = opts
+            out["earlier"] = {"plan_id": anc.id, "clock": fmt_time(anc.clock) if anc.clock is not None else None,
+                              "strategy": anc.strategy, "options": [public(o) for o in opts]}
+        return out
+    opts = _suggest_one(s, p, vid)
     SUGGESTIONS.setdefault(pid, {})[vid] = opts
     return {"plan_id": pid, "visit_id": vid, "options": [public(o) for o in opts]}
 

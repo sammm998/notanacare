@@ -14,7 +14,13 @@ staffing, recipient non-overlap). Ruin operators:
 * cluster:   a seed visit and its nearest placed neighbours (any employee),
 * string:    a run of consecutive visits of one route plus the same time
              slice of a nearby route,
-* long legs: the visits reached by the longest trips.
+* long legs: the visits reached by the longest trips,
+* detours:   out-and-back excursions (A -> far B -> back near A); B is
+             ruined with the visits around it *at the same time of day*, so
+             it can move to someone working nearby.
+
+Neighbourhoods are measured in space and time: a visit at the same address
+but six hours later is not a neighbour of one at 08:00.
 
 A candidate is kept if its cost is lower (threshold acceptance with a
 temperature that falls to zero). Cost = unplanned penalties + travel time and
@@ -26,6 +32,7 @@ and checked by the independent validator like any other plan.
 
 from __future__ import annotations
 
+import operator
 import random
 import time
 
@@ -40,6 +47,7 @@ class _Cost:
         self.p = p
         self.w = p.weights
         self._assign: dict[tuple[str, str], int] = {}
+        self._route: dict[str, tuple[tuple, int]] = {}  # employee -> (stops, cost); stops are immutable objects
 
     def assign(self, t: Task, eid: str) -> int:
         k = (t.visit_id, eid)
@@ -66,8 +74,16 @@ class _Cost:
             cur = loc
         return total
 
+    def route_cached(self, eid: str, r) -> int:  # noqa: ANN001 - WorkRoute
+        c = self._route.get(eid)
+        if c is not None and len(c[0]) == len(r.stops) and all(map(operator.is_, c[0], r.stops)):
+            return c[1]
+        val = self.route(r) if any(s.kind == "visit" for s in r.stops) else 0
+        self._route[eid] = (tuple(r.stops), val)
+        return val
+
     def total(self, ctor: Constructor, tasks: dict[str, Task]) -> int:
-        c = sum(self.route(r) for r in ctor.routes.values() if any(s.kind == "visit" for s in r.stops))
+        c = sum(self.route_cached(eid, r) for eid, r in ctor.routes.items())
         for vid, pl in ctor.placements.items():
             t = pl.task
             if t.pinned:
@@ -117,8 +133,30 @@ def improve(
     start_unplanned = sum(1 for v in tasks if v not in ctor.placements)
     t_start = max(200.0, 0.002 * cur if cur < 10**7 else 2000.0)
 
-    def nearest(loc: str, pool: list[str], k: int) -> list[str]:
-        return sorted(pool, key=lambda v: tm.minutes(loc, tasks[v].location_id))[:k]
+    def nearest(loc: str, pool: list[str], k: int, around: Task | None = None) -> list[str]:
+        if around is None:
+            return sorted(pool, key=lambda v: tm.minutes(loc, tasks[v].location_id))[:k]
+
+        def key(v: str) -> float:
+            t = tasks[v]
+            gap = max(0, max(t.earliest, around.earliest) - min(t.latest, around.latest))
+            return tm.minutes(loc, t.location_id) + 0.25 * gap
+        return sorted(pool, key=key)[:k]
+
+    def detours() -> list[tuple[int, str]]:
+        out = []
+        for r in ctor.routes.values():
+            vtm = r.vehicle.travel or tm
+            seq = [(r.vehicle.start_location, None)] + [(s.location, s.visit_id) for s in r.stops if s.kind == "visit"] \
+                + [(r.vehicle.end_location, None)]
+            for (a, _), (b, vid), (c, _) in zip(seq, seq[1:], seq[2:]):
+                if vid is None or vid not in ctor.placements or tasks[vid].pinned or a == b or b == c:
+                    continue
+                d = vtm.minutes(a, b) + vtm.minutes(b, c) - vtm.minutes(a, c)
+                if d >= 12:
+                    out.append((d, vid))
+        out.sort(reverse=True)
+        return out
 
     while True:
         el = time.perf_counter() - t0
@@ -132,11 +170,15 @@ def improve(
             break
         op = rng.random()
         k = rng.randint(6, 18)
-        if op < 0.5:
+        if op < 0.4:
             seed_v = rng.choice(unplanned) if (unplanned and rng.random() < 0.4) else rng.choice(placed)
-            ruin = nearest(tasks[seed_v].location_id, placed, k)
+            ruin = nearest(tasks[seed_v].location_id, placed, k, around=tasks[seed_v] if rng.random() < 0.7 else None)
             centre = tasks[seed_v].location_id
-        elif op < 0.8 and (busy_routes := [
+        elif op < 0.6 and (dt := detours()):
+            pick = rng.choice(dt[: max(3, len(dt) // 4)])[1]
+            centre = tasks[pick].location_id
+            ruin = [pick] + nearest(centre, [v for v in placed if v != pick], k - 1, around=tasks[pick])
+        elif op < 0.85 and (busy_routes := [
             e for e, r in ctor.routes.items()
             if any(s.kind == "visit" and s.visit_id in ctor.placements and not tasks[s.visit_id].pinned for s in r.stops)
         ]):

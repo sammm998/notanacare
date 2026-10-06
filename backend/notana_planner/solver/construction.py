@@ -14,7 +14,7 @@ from dataclasses import dataclass
 
 from .costs import assignment_penalty, clamp, time_deviation_cost
 from .problem import PlanningProblem, Task
-from .routes import InsertionOption, Stop, WorkRoute, insertion_options
+from .routes import InsertionOption, Stop, WorkRoute, insertion_options, route_visit_ids
 
 
 @dataclass(slots=True)
@@ -103,7 +103,7 @@ class Constructor:
             v = route.vehicle
             if v.start_time > task.latest or v.end_time < task.earliest + task.duration:
                 continue
-            if any(s.visit_id == task.visit_id for s in route.stops):
+            if task.visit_id in route_visit_ids(route, self.tm):
                 continue
             for opt in insertion_options(route, stop, self.tm):
                 pen = assignment_penalty(self.p, task, eid) + self.p.weights.travel_minute * opt.delta_travel

@@ -102,10 +102,14 @@ frontend/            no-build ES modules: map (vendored Leaflet), Gantt, panels
    Double-staffed visits are inserted as **pairs**: two different qualified employees whose
    feasible start intervals intersect, fixed at the same start in both routes.
 2. **Ruin-and-recreate LNS** (`solver/ruin_recreate.py`, 75 % of the time budget): remove a
-   geographic cluster, a string of one route or the visits reached by the longest trips, re-insert
+   cluster of visits close in space *and time*, a string of one route, the visits reached by the
+   longest trips, or an out-and-back excursion (A → far B → back near A, B removed together with the
+   visits around it at the same time so it can move to someone working there), re-insert
    them (plus unplanned visits nearby) with the same exact checks, keep the result if the cost is
    lower (threshold acceptance). Cost = unplanned penalties + travel + long-trip penalty
-   (150/min beyond 15 min) + continuity, wishes and area costs.
+   (150/min beyond 15 min) + continuity, wishes and area costs. The insertion check is linear
+   (earliest/latest starts of a route computed once and cached, every position checked in O(1);
+   identical to full recomputation, checked on 1.8 M calls), which doubles the LNS iterations.
    *Why:* measured on the full day, OR-Tools' local search evaluated ~15 moves/s and found **no**
    improving solution in 25 s (≈10,000 cross-route constraints). With the LNS the default day goes
    from 22 to 5–8 unplanned visits and 90 % of trips are ≤ 15–17 min.
@@ -317,6 +321,10 @@ involved (no API key).
   employees) implies ≈ 5 h of care per employee per day, so it is **inherently tight**. Defaults use
   Swedish home-care shift templates that comply with Arbetstidslagen (early, late, *delad tur*
   07:30–12:00 + 16:30–20:30, part-time) with meal breaks between demand peaks.
+* Staffing as a unit manager would lay it out: team size follows each zone's care minutes, every team
+  gets the same shift mix, and delegations/skills are spread evenly over each team's shifts and
+  weighted by the zone's need. Compared with random allocation this halves visits outside the own
+  zone, cuts out-and-back detours by ~40 % and travel per visit by ~15 % (four seeds).
 * With the defaults (pressure 0.15, wishes and Arbetstidslagen on) one day plans **96.3–98.7 % of
   the ~5,000 interventions** (seed 42: 4,935 of 5,002, 8 unplanned visits; seed 43: 97.5 %, 14;
   seed 44: 96.3 %, 21), every plan VALID; median trip 7 min, 90 % of trips ≤ 15–18 min. Before the LNS

@@ -126,3 +126,34 @@ def test_visit_recommendation_can_be_accepted():
     assert vid in after["assignments"] and after["validation"]["valid"]
     planned_vid = next(iter(plan["assignments"]))
     assert client.post(f"/api/plans/{pid}/visits/{planned_vid}/suggestions").status_code in (400, 409)
+
+
+def test_closed_window_points_to_earlier_plan_where_it_is_solvable():
+    from notana_planner import api
+
+    client = TestClient(api.app)
+    sc = client.post("/api/scenarios", json={"seed": 5, "target_interventions": 900, "employee_count": 12}).json()
+    j = _wait(client, client.post(f"/api/scenarios/{sc['id']}/plan", json={"time_limit_s": 4}).json()["job_id"])
+    pid = j["result"]["plan_id"]
+    plan = client.get(f"/api/plans/{pid}").json()
+    inc = client.post(f"/api/scenarios/{sc['id']}/incidents",
+                      json={"kind": "employee_delayed", "clock": 19 * 60,
+                            "params": {"employee_id": next(iter(plan["routes"])), "minutes": 10}}).json()
+    j2 = _wait(client, inc["job_id"])
+    assert j2["status"] == "done", j2.get("error")
+    late = j2["result"]["after_plan_id"]
+    after = client.get(f"/api/plans/{late}").json()
+    early = [v for v in after["unplanned"] if v in plan["unplanned"]
+             and next(x for x in sc_visits(client, sc["id"]) if x["id"] == v)["latest"] < 19 * 60]
+    assert early, "need an unplanned visit whose window closed before 19:00"
+    rec = client.post(f"/api/plans/{late}/visits/{early[0]}/suggestions").json()
+    assert rec["options"] == [] and rec["window_closed"]
+    assert rec["earlier"]["plan_id"] == pid and rec["earlier"]["options"]
+    opt = next(o for o in rec["earlier"]["options"] if o["kind"] != "pool" and o["level"] != "not_permitted")
+    client.post(f"/api/plans/{pid}/activate")
+    r = client.post(f"/api/plans/{pid}/suggestions/{opt['id']}/apply").json()
+    assert early[0] in client.get(f"/api/plans/{r['plan_id']}").json()["assignments"]
+
+
+def sc_visits(client, sid):
+    return client.get(f"/api/scenarios/{sid}").json()["visits"]

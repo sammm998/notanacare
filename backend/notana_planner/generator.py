@@ -112,7 +112,7 @@ def generate_scenario(config: ScenarioConfig | None = None, scenario_id: str | N
     bases = _make_bases(area, locations)
 
     recipients, interventions = _make_demand(rng, cfg, area, locations, prng)
-    employees = _make_employees(rng, cfg, area, recipients, bases, prng)
+    employees = _make_employees(rng, cfg, area, recipients, bases, prng, interventions)
     _assign_continuity(rng, recipients, employees)
 
     visits = build_visits(recipients, interventions)
@@ -177,7 +177,7 @@ def generate_week(config: ScenarioConfig | None = None, scenario_id: str | None 
     recipients, day0 = _make_demand(rng, cfg, area, locations, prng, allowed_on(0), profiles)
     headcount = max(cfg.employee_count, round(cfg.employee_count * 7 / 5))
     staff_cfg = replace(cfg, employee_count=headcount)
-    employees = _make_employees(rng, staff_cfg, area, recipients, bases, prng)
+    employees = _make_employees(rng, staff_cfg, area, recipients, bases, prng, day0)
     _assign_continuity(rng, recipients, employees)
     # Days off spread evenly per shift type and team, so every day has the same mix.
     for i, e in enumerate(sorted(employees.values(), key=lambda e: (e.shift_name, e.team, e.id))):
@@ -458,7 +458,18 @@ def _make_employees(
     recipients: dict[str, CareRecipient],
     bases: list[str],
     prng: random.Random,
+    interventions: dict | None = None,
 ) -> dict[str, Employee]:
+    """Staff the area the way a unit manager would.
+
+    * Team size per zone follows the zone's care minutes (not head count).
+    * Every team gets the same mix of shifts, so no zone is short in the
+      afternoon while another has all the late shifts.
+    * Delegations and skills are spread evenly over each team's shifts and
+      weighted by how much the zone needs them, so a time-critical
+      medication visit normally has a delegated colleague nearby; staff only
+      cross into another zone when their own zone is really full.
+    """
     n = cfg.employee_count
     p = max(0.0, min(1.0, cfg.staffing_pressure))
     weights = [w0 + (w1 - w0) * p for (*_, w0, w1) in SHIFT_TEMPLATES]
@@ -468,29 +479,66 @@ def _make_employees(
         shift_list += [(name, s, e, gap, brk)] * cnt
     rng.shuffle(shift_list)
 
-    # Teams proportional to recipient demand per zone.
     zone_names = [c.name for c in area.clusters]
-    demand = [sum(1 for r in recipients.values() if r.zone == z) + 0.5 for z in zone_names]
-    team_counts = _quota(demand, n)
-    teams: list[int] = []
-    for zi, cnt in enumerate(team_counts):
-        teams += [zi] * cnt
+    q = C.EMPLOYEE_QUALIFICATION_RATES
+    quals = (C.MEDICATION, C.WOUND_CARE, C.CATHETER) + tuple(C.SKILLS)
+    minutes = {z: 1.0 for z in zone_names}
+    need = {(z, k): 0.0 for z in zone_names for k in quals}
+    if interventions:
+        for it in interventions.values():
+            z = recipients[it.recipient_id].zone
+            minutes[z] += it.duration_minutes
+            for k in set(it.required_delegations) | set(it.required_skills):
+                if k == C.INSULIN:
+                    k = C.MEDICATION
+                if (z, k) in need:
+                    need[(z, k)] += it.duration_minutes
+    else:  # no demand known: by recipients
+        for r in recipients.values():
+            minutes[r.zone] += 1
+    team_counts = _quota([minutes[z] for z in zone_names], n)
+
+    # Deal the shifts (sorted by start) to the teams in proportion, so each team gets the same mix.
+    order = sorted(range(n), key=lambda i: (shift_list[i][1], shift_list[i][2]))
+    dealt = [0] * len(zone_names)
+    team_shifts: list[list[tuple]] = [[] for _ in zone_names]
+    for i in order:
+        zi = min((z for z in range(len(zone_names)) if dealt[z] < team_counts[z]),
+                 key=lambda z: ((dealt[z] + 0.5) / team_counts[z], z))
+        dealt[zi] += 1
+        team_shifts[zi].append(shift_list[i])
+
+    def spread(size: int, count: int) -> set[int]:
+        """``count`` of ``size`` positions, evenly spaced with a random phase."""
+        count = max(0, min(size, count))
+        if not count:
+            return set()
+        phase = rng.random()
+        return {min(size - 1, int((k + phase) * size / count)) for k in range(count)}
+
+    total_min = sum(minutes.values())
+    plan: list[tuple[int, tuple, set[str]]] = []
+    for zi, z in enumerate(zone_names):
+        size = len(team_shifts[zi])
+        held: list[set[str]] = [set() for _ in range(size)]
+        for k in quals:
+            tot = sum(need[(zz, k)] for zz in zone_names)
+            # The zone's share of this need relative to its share of all care, damped.
+            rel = (need[(z, k)] / tot) / (minutes[z] / total_min) if tot else 1.0
+            rate = min(0.95, q[k] * max(0.75, min(1.35, rel ** 0.5)))
+            for pos in spread(size, round(rate * size)):
+                held[pos].add(k)
+        meds = [i for i in range(size) if C.MEDICATION in held[i]]
+        for j in spread(len(meds), round(q[C.INSULIN] * len(meds))):
+            held[meds[j]].add(C.INSULIN)
+        plan += [(zi, team_shifts[zi][i], held[i]) for i in range(size)]
 
     employees: dict[str, Employee] = {}
     for i in range(n):
         eid = f"E-{i + 1:03d}"
-        shift_name, s, e, gap, brk = shift_list[i]
-        zi = teams[i]
-        q = C.EMPLOYEE_QUALIFICATION_RATES
-        delegations = []
-        if rng.random() < q[C.MEDICATION]:
-            delegations.append(C.MEDICATION)
-            if rng.random() < q[C.INSULIN]:
-                delegations.append(C.INSULIN)
-        for d in (C.WOUND_CARE, C.CATHETER):
-            if rng.random() < q[d]:
-                delegations.append(d)
-        skills = [sk for sk in C.SKILLS if rng.random() < q[sk]]
+        zi, (shift_name, s, e, gap, brk), held = plan[i]
+        delegations = [d for d in (C.MEDICATION, C.INSULIN, C.WOUND_CARE, C.CATHETER) if d in held]
+        skills = [sk for sk in C.SKILLS if sk in held]
         finnish = rng.random() < 0.08  # Finnish-speaking staff
         breaks = []
         unavailable = []
