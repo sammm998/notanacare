@@ -55,7 +55,11 @@ def assemble_plan(
                 loc = st.location_id
             route_end = old.route_end
             to_end = etm.minutes(loc, old.end_location_id or emp.end_location_id)
-            if stops and route_end is not None:
+            if stops and clock is not None and stops[-1].end <= clock:
+                # The trip home already started (or the day is over): it was driven
+                # under the conditions of that time, later traffic does not change it.
+                to_end = old.travel_to_end if old.travel_to_end is not None else to_end
+            elif stops and route_end is not None:
                 route_end = max(route_end, stops[-1].end + to_end)
             routes[eid] = Route(
                 employee_id=eid,
@@ -108,6 +112,11 @@ def assemble_plan(
             last = prefix[-1]
             route.travel_to_end = etm.minutes(last.location_id, emp.end_location_id)
             route.route_end = None
+            if (clock is not None and prev_route is not None and prev_route.route_end is not None
+                    and prev_route.route_end <= clock and prev_route.stops and prev_route.stops[-1].end == last.end):
+                # The day is already over: keep the recorded trip home.
+                route.route_end = prev_route.route_end
+                route.travel_to_end = prev_route.travel_to_end
         routes[eid] = route
 
     assignments: dict[str, Assignment] = {}

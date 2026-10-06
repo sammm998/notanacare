@@ -270,7 +270,8 @@ def validate_plan(
                 if not last_locked:
                     err("ROUTE_END_MISSING", f"{eid}: route has no return time", employee_id=eid)
             else:
-                if prev_end + t_end > route.route_end:
+                home_started = clock is not None and bool(stops) and prev_end <= clock
+                if not home_started and prev_end + t_end > route.route_end:
                     err(
                         "RETURN_INFEASIBLE",
                         f"{eid}: cannot return to {end_loc} by {_hhmm(route.route_end)}",

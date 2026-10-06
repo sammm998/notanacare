@@ -296,20 +296,20 @@ API key is set, and notes that a single seed is indicative rather than statistic
 
 ### Measured result (default scenario, seed 42, no API key)
 
-Baseline day plan: **582 / 587 visits planned, VALID** (wishes, Arbetstidslagen and LNS on). Incident
+Baseline day plan: **584 / 587 visits planned, VALID** (wishes, Arbetstidslagen and LNS on). Incident
 chain: 2 employees sick at 10:14 → Södermalm traffic ×1.6 at 10:34 → a 25-min delay at 10:44 → a
 medication moved at 10:54.
 
 | Strategy | Unplanned at end | Lost vs base plan | Hard violations | Travel (min) | Changed assignments | Re-plan runtime |
 |---|---|---|---|---|---|---|
-| A. Baseline optimizer | 17 | 15 | 0 | 8,359 | 84 | 112 s |
-| B. + enhanced repair | 19 | 14 | 0 | 7,945 | 71 | 112 s |
-| C. + advisor (deterministic, case-based) | 16 | 14 | 0 | 8,372 | 84 | 95 s |
-| D. + mock classifier ranking | 14 | 10 | 0 | 8,202 | 96 | 111 s |
-| E. + learned selector (ML) | 14 | 12 | 0 | 8,203 | 103 | 109 s |
+| A. Baseline optimizer | 13 | 11 | 0 | 6,581 | 64 | 87 s |
+| B. + enhanced repair | 13 | 10 | 0 | 6,549 | 63 | 83 s |
+| C. + advisor (deterministic, case-based) | 13 | 10 | 0 | 6,479 | 61 | 112 s |
+| D. + mock classifier ranking | 12 | 9 | 0 | 6,703 | 81 | 107 s |
+| E. + learned selector (ML) | 13 | 10 | 0 | 6,503 | 65 | 107 s |
 
-Reading it honestly: on this one chain D and E end with the fewest unplanned visits, at the cost of
-more changed assignments. One seed shows nothing statistically; the 96-case nested cross-validation
+Reading it honestly: on this one chain D ends with one unplanned visit fewer, at the cost of the most
+changed assignments and the most travel; the others are within a few percent of each other. One seed shows nothing statistically; the 96-case nested cross-validation
 (see Machine learning) is the measure that counts, and there E does not beat the default yet. No LLM was
 involved (no API key).
 
@@ -325,14 +325,16 @@ involved (no API key).
   gets the same shift mix, and delegations/skills are spread evenly over each team's shifts and
   weighted by the zone's need. Compared with random allocation this halves visits outside the own
   zone, cuts out-and-back detours by ~40 % and travel per visit by ~15 % (four seeds).
-* With the defaults (pressure 0.15, wishes and Arbetstidslagen on) one day plans **96.3–98.7 % of
-  the ~5,000 interventions** (seed 42: 4,935 of 5,002, 8 unplanned visits; seed 43: 97.5 %, 14;
-  seed 44: 96.3 %, 21), every plan VALID; median trip 7 min, 90 % of trips ≤ 15–18 min. Before the LNS
-  the same day left 22 visits unplanned (seed 42). A full default week (35,253 interventions, 4,167
-  visits, 140 employees) plans 33,544 interventions (95.2 %) in about 3 minutes, all seven days VALID
-  and the week rules met. An understaffed day (1,516 interventions, 24 employees) plans 74.5 %; every
-  unplanned visit gets ranked options (best: minor deviation 14, pool staff 20, major 10) and
-  auto-fix within the rules reaches 76.2 %.
+* With the defaults (pressure 0.15, wishes and Arbetstidslagen on) one day plans **97.8–99.2 % of
+  the ~5,000 interventions** (seed 42: 4,960 of 5,002, 5 unplanned visits; seed 43: 97.8 %, 12;
+  seed 44: 98.0 %, 11), every plan VALID; median trip 6–7 min, 90 % of trips ≤ 12–13 min, travel per
+  visit 10.2–11.7 min (was 11.8–13.0 before demand-based staffing). Before the LNS the same day left 22
+  visits unplanned (seed 42). A live day (8 events) keeps every plan VALID; alarms have staff on site in
+  5–11 min. A full default week (35,253 interventions, 4,167 visits, 140 employees) plans 34,024
+  interventions (96.5 %) in about 3 minutes, all seven days VALID and the week rules met. An
+  understaffed day (1,516 interventions, 24 employees) plans 80.6 %; every unplanned visit gets ranked
+  options (best: minor deviation 10, pool staff 19, major 6) and auto-fix within the rules plans one
+  more visit (80.7 %).
 * Machine learning, measured honestly: on 96 simulated cases (nested 5-fold CV) the learned selector
   scores 375 vs 365 for the default and 354 for the oracle, i.e. it does **not** beat the default yet
   (the default is within 3 % of the oracle). More and more varied cases are needed; the app can

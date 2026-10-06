@@ -381,7 +381,7 @@ footer { margin-top: 64px; padding-top: 18px; border-top: 1px solid var(--line);
 
     <h2 id="data">Testdata</h2>
     <p><b>Bemanning som en enhetschef skulle lägga den.</b> Teamens storlek följer områdets vårdminuter, varje team får samma blandning av pass (tidig, delad, sen, deltid), och delegeringar och kompetenser (läkemedel, insulin, sår, kateter, lyft, demens, palliativ) sprids jämnt över teamets pass och viktas efter områdets behov. Då finns det normalt en behörig kollega i närheten av ett tidskritiskt läkemedelsbesök, och personal åker bara till ett annat område när det egna är fullt. Jämfört med slumpad fördelning: ungefär hälften så många besök utanför det egna området, 40 % mindre omvägar och 15 % kortare restid per besök (fyra seeds).</p>
-    <p>All data är syntetisk och deterministisk från ett seed. Standard: Stockholm, seed 42, 5 000 insatser, 100 medarbetare och bemanningstryck 0,15. Ett mindre scenario med fler insatser per medarbetare, till exempel 1 500 insatser och 24 medarbetare, ger en underbemannad dag där cirka 70–80 % av insatserna går att planera. Det är bra för att visa förslagen.</p>
+    <p>All data är syntetisk och deterministisk från ett seed. Standard: Stockholm, seed 42, 5 000 insatser, 100 medarbetare och bemanningstryck 0,15. Ett mindre scenario med fler insatser per medarbetare, till exempel 1 500 insatser och 24 medarbetare, ger en underbemannad dag där cirka 80 % av insatserna går att planera. Det är bra för att visa förslagen.</p>
 
     <h2 id="api">API (urval)</h2>
     <div class="tbl"><table>
@@ -409,48 +409,48 @@ footer { margin-top: 64px; padding-top: 18px; border-top: 1px solid var(--line);
     <p>Mätt på standardscenariot (Stockholm, syntetiska restider, 25 s per dag, bemanningstryck 0,15, önskemål och Arbetstidslagen påslagna). Körningarna gick parallellt på 4 kärnor, så siffrorna är snarare i underkant.</p>
     <h3>En dag (≈5 000 insatser, 100 medarbetare)</h3>
     <div class="figures">
-      <div><div class="n">98,7 %</div><div class="l">av 5 002 insatser planerade (seed 42)</div></div>
-      <div><div class="n">579 / 587</div><div class="l">besök, giltig plan</div></div>
-      <div><div class="n">7 min</div><div class="l">medianresa mellan besök</div></div>
-      <div><div class="n">≤ 15 min</div><div class="l">för 90 % av resorna</div></div>
-      <div><div class="n">12,4 min</div><div class="l">restid per besök</div></div>
+      <div><div class="n">99,2 %</div><div class="l">av 5 002 insatser planerade (seed 42)</div></div>
+      <div><div class="n">582 / 587</div><div class="l">besök, giltig plan</div></div>
+      <div><div class="n">6 min</div><div class="l">medianresa mellan besök</div></div>
+      <div><div class="n">≤ 12 min</div><div class="l">för 90 % av resorna</div></div>
+      <div><div class="n">10,2 min</div><div class="l">restid per besök (tidigare 12,4)</div></div>
       <div><div class="n">≈ 26 s</div><div class="l">optimering + validering</div></div>
     </div>
     <div class="tbl"><table>
       <thead><tr><th>Seed</th><th class="num">Insatser planerade</th><th class="num">Oplanerade besök</th><th class="num">Resa / besök</th><th class="num">90 % av resorna ≤</th><th class="num">Längsta resa</th><th>Validator</th></tr></thead>
       <tbody>
-        <tr><td>42</td><td class="num">4 935 / 5 002 (98,7 %)</td><td class="num">8</td><td class="num">12,4</td><td class="num">15</td><td class="num">44</td><td>VALID</td></tr>
-        <tr><td>43</td><td class="num">4 885 / 5 008 (97,5 %)</td><td class="num">14</td><td class="num">11,8</td><td class="num">15</td><td class="num">46</td><td>VALID</td></tr>
-        <tr><td>44</td><td class="num">4 829 / 5 014 (96,3 %)</td><td class="num">21</td><td class="num">13,0</td><td class="num">18</td><td class="num">53</td><td>VALID</td></tr>
+        <tr><td>42</td><td class="num">4 960 / 5 002 (99,2 %)</td><td class="num">5</td><td class="num">10,2</td><td class="num">12</td><td class="num">51</td><td>VALID</td></tr>
+        <tr><td>43</td><td class="num">4 899 / 5 008 (97,8 %)</td><td class="num">12</td><td class="num">10,7</td><td class="num">13</td><td class="num">56</td><td>VALID</td></tr>
+        <tr><td>44</td><td class="num">4 914 / 5 014 (98,0 %)</td><td class="num">11</td><td class="num">11,7</td><td class="num">13</td><td class="num">53</td><td>VALID</td></tr>
       </tbody>
     </table></div>
     <p>Före LNS lämnade samma dag 22 oplanerade besök (seed 42). Ruin-and-recreate-sökningen gav den största förbättringen i hela projektet.</p>
     <h3>Underbemannad dag (1 516 insatser, 24 medarbetare)</h3>
-    <p>74,5 % av insatserna planerade, 44 oplanerade besök. Alla 44 fick förslag. Bästa förslaget var en mindre avvikelse för 14 besök, poolpersonal för 20 och en större avvikelse för 10. Inget besök hade en lösning helt inom reglerna utan extra resurs. Auto-fix inom reglerna planerade 3 fler besök (74,5 % → 76,2 %) på 110 s, och planen förblev giltig.</p>
+    <p>80,6 % av insatserna planerade, 35 oplanerade besök. Alla 35 fick förslag. Bästa förslaget var en mindre avvikelse för 10 besök, poolpersonal för 19 och en större avvikelse för 6. Inget besök hade en lösning helt inom reglerna utan extra resurs. Auto-fix inom reglerna planerade 1 besök till (80,6 % → 80,7 %) på 107 s, och planen förblev giltig.</p>
     <h3>Live-dag</h3>
-    <p>7 händelser: 2 VAB, 2 trygghetslarm, 2 flyttade mediciner och en försening. Alla 7 planer var giltiga. Larmen hade personal på plats efter 6 min. Varje händelse planerades om på 2,5–6,2 s. Oplanerade besök ökade från 6 till 16 under dagen (97,4 % av insatserna fortfarande planerade), och varje nytt oplanerat besök fick sitt bästa förslag i flödet.</p>
+    <p>8 händelser: 2 VAB, 3 trygghetslarm, 2 flyttade mediciner och en försening. Alla 8 planer var giltiga. Larmen hade personal på plats efter 5–11 min. Varje händelse planerades om på 1,7–7,1 s. Oplanerade besök ökade från 16 till 22 under dagen (96,2 % av insatserna fortfarande planerade; den här körningen gick samtidigt med testsviten), och varje nytt oplanerat besök fick sitt bästa förslag i flödet. En trafikhändelse sent på dagen ändrar inte längre hemresor som redan är gjorda: de kördes under dåtidens förhållanden.</p>
     <h3>En vecka</h3>
     <div class="figures">
       <div><div class="n">35 253</div><div class="l">insatser måndag–söndag</div></div>
-      <div><div class="n">95,2 %</div><div class="l">planerade (33 544)</div></div>
-      <div><div class="n">3 977 / 4 167</div><div class="l">besök</div></div>
+      <div><div class="n">96,5 %</div><div class="l">planerade (34 024)</div></div>
+      <div><div class="n">4 034 / 4 167</div><div class="l">besök</div></div>
       <div><div class="n">7 / 7</div><div class="l">dagar giltiga</div></div>
       <div><div class="n">840</div><div class="l">veckokontroller utan fel</div></div>
       <div><div class="n">≈ 3 min</div><div class="l">hela veckan</div></div>
     </div>
     <h3>Experiment A–E (seed 42)</h3>
-    <p>Grundplan 582 av 587. Därefter samma händelsekedja för alla: två sjukanmälningar 10:14, trafik ×1,6 10:34, försening 10:44, flyttad medicin 10:54.</p>
+    <p>Grundplan 584 av 587. Därefter samma händelsekedja för alla: två sjukanmälningar 10:14, trafik ×1,6 10:34, försening 10:44, flyttad medicin 10:54.</p>
     <div class="tbl"><table>
       <thead><tr><th>Strategi</th><th class="num">Oplanerade till slut</th><th class="num">Tappade</th><th class="num">Hårda fel</th><th class="num">Restid (min)</th><th class="num">Ändrade tilldelningar</th></tr></thead>
       <tbody>
-        <tr><td>A · Bas</td><td class="num">17</td><td class="num">15</td><td class="num">0</td><td class="num">8 359</td><td class="num">84</td></tr>
-        <tr><td>B · Utökad reparation</td><td class="num">19</td><td class="num">14</td><td class="num">0</td><td class="num">7 945</td><td class="num">71</td></tr>
-        <tr><td>C · Rådgivare (fallbaserad, ingen API-nyckel)</td><td class="num">16</td><td class="num">14</td><td class="num">0</td><td class="num">8 372</td><td class="num">84</td></tr>
-        <tr><td>D · Mock-klassificerare</td><td class="num">14</td><td class="num">10</td><td class="num">0</td><td class="num">8 202</td><td class="num">96</td></tr>
-        <tr><td>E · Inlärd (ML)</td><td class="num">14</td><td class="num">12</td><td class="num">0</td><td class="num">8 203</td><td class="num">103</td></tr>
+        <tr><td>A · Bas</td><td class="num">13</td><td class="num">11</td><td class="num">0</td><td class="num">6 581</td><td class="num">64</td></tr>
+        <tr><td>B · Utökad reparation</td><td class="num">13</td><td class="num">10</td><td class="num">0</td><td class="num">6 549</td><td class="num">63</td></tr>
+        <tr><td>C · Rådgivare (fallbaserad, ingen API-nyckel)</td><td class="num">13</td><td class="num">10</td><td class="num">0</td><td class="num">6 479</td><td class="num">61</td></tr>
+        <tr><td>D · Mock-klassificerare</td><td class="num">12</td><td class="num">9</td><td class="num">0</td><td class="num">6 703</td><td class="num">81</td></tr>
+        <tr><td>E · Inlärd (ML)</td><td class="num">13</td><td class="num">10</td><td class="num">0</td><td class="num">6 503</td><td class="num">65</td></tr>
       </tbody>
     </table></div>
-    <p>På det här enda fallet slutar D och E med minst oplanerade, men med fler ändrade tilldelningar. Ett enda seed visar inte att någon strategi är bättre. Korsvalideringen över 96 fall (avsnitt Maskininlärning) är det mått som gäller, och där slår E inte standardvalet ännu.</p>
+    <p>På det här enda fallet slutar D med ett oplanerat besök mindre, men med flest ändrade tilldelningar och mest restid. Övriga ligger inom några procent av varandra. Ett enda seed visar inte att någon strategi är bättre. Korsvalideringen över 96 fall (avsnitt Maskininlärning) är det mått som gäller, och där slår E inte standardvalet ännu.</p>
 
     <h2 id="begransningar">Begränsningar</h2>
     <ul>

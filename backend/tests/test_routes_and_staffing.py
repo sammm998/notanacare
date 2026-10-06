@@ -53,3 +53,21 @@ def test_every_team_has_the_shift_mix_and_delegations():
     total = sum(minutes.values())
     for t in teams:
         assert abs(share[t] - minutes[t] / total) < 0.03, (t, share[t], minutes[t] / total)
+
+
+def test_late_traffic_does_not_rewrite_finished_trips_home(small_world, small_plan):
+    from notana_planner.incidents import Incident, apply_incident
+    from notana_planner.replanning import clone_world, replan
+
+    w = clone_world(small_world)
+    clock = 17 * 60
+    done = {e: r.route_end for e, r in small_plan.routes.items() if r.route_end is not None and r.route_end <= clock}
+    assert done, "need routes that finished before the clock"
+    zones = sorted({rec.zone for rec in w.scenario.recipients.values()})
+    plan = small_plan
+    for z in zones:  # heavy traffic everywhere
+        eff = apply_incident(w, plan, Incident("traffic", clock, {"zone": z, "multiplier": 1.8}))
+        plan = replan(w, plan, eff).plan
+    assert plan.validation["valid"], plan.validation.get("errors", [])[:3]
+    for e, end in done.items():
+        assert plan.routes[e].route_end == end
