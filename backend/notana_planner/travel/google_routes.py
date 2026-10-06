@@ -47,7 +47,9 @@ class GoogleRoutesTravelTimeProvider(TravelTimeProvider):
         timeout_s: float = 20.0,
         max_requests: int = 600,
         max_retries: int = 5,
-        pace_s: float = 0.25,
+        pace_s: float = 0.05,
+        budget_s: float | None = None,
+        workers: int = 3,
     ) -> None:
         self.api_key = api_key or os.environ.get("GOOGLE_MAPS_API_KEY")
         if not self.api_key:
@@ -59,6 +61,11 @@ class GoogleRoutesTravelTimeProvider(TravelTimeProvider):
         self.max_requests = max_requests
         self.max_retries = max_retries
         self.pace_s = pace_s
+        # Wall-clock budget for one matrix: Routes API allows ~3,000 elements/minute,
+        # a 165-address day is ~27,000, so the closest pairs are fetched first.
+        self.budget_s = float(budget_s if budget_s is not None else os.environ.get("NOTANA_GOOGLE_BUDGET_S", 60))
+        self.workers = workers
+        self.progress = None  # optional callable(str) for job progress
 
     # -- caching -------------------------------------------------------------
     def _cache_key(self, locations: list[Location], departure_minute: int) -> str:
@@ -83,67 +90,100 @@ class GoogleRoutesTravelTimeProvider(TravelTimeProvider):
         n = len(locations)
         minutes = [row[:] for row in synthetic.minutes]
         km = [row[:] for row in synthetic.km]
-        filled = 0
-        failed_blocks = 0
-        ok_blocks = 0
-        requests = 0
+        departure = self._departure_time(departure_minute)
+        # Blocks of 25 locations, grouped by zone, requested closest pairs first:
+        # routes almost only use short trips, so within a time budget the pairs
+        # that matter come from Google and far pairs keep the synthetic estimate.
+        order = sorted(range(n), key=lambda k: (locations[k].zone, locations[k].id))
+        groups = [order[k:k + BLOCK] for k in range(0, n, BLOCK)]
+        cent = [(sum(locations[k].lat for k in g) / len(g), sum(locations[k].lon for k in g) / len(g)) for g in groups]
+
+        def dist(a: int, b: int) -> float:
+            (la, lo), (lb, lb2) = cent[a], cent[b]
+            return (la - lb) ** 2 + ((lo - lb2) * 0.55) ** 2
+
+        pairs = sorted(((a, b) for a in range(len(groups)) for b in range(len(groups))), key=lambda p: (dist(*p), p))
+        deadline = time.monotonic() + self.budget_s
+        filled = ok_blocks = failed_blocks = skipped = requests = 0
         errors: dict[str, int] = {}
         fatal: str | None = None
-        departure = self._departure_time(departure_minute)
-        for oi in range(0, n, BLOCK):
-            for di in range(0, n, BLOCK):
-                if fatal or requests >= self.max_requests:
-                    failed_blocks += 1
-                    continue
-                origins = locations[oi : oi + BLOCK]
-                dests = locations[di : di + BLOCK]
-                try:
-                    elements, tries = self._request_with_retry(origins, dests, departure)
-                    requests += tries
-                except _FatalRouteError as exc:
-                    fatal = str(exc)
-                    failed_blocks += 1
-                    log.error("Routes API rejected the request: %s", exc)
-                    continue
-                except Exception as exc:  # noqa: BLE001 - give up on this block only
-                    failed_blocks += 1
-                    key = type(exc).__name__ + (f" {getattr(exc, 'code', '')}" if hasattr(exc, "code") else "")
-                    errors[key] = errors.get(key, 0) + 1
-                    log.warning("Route matrix block failed after retries (%s); synthetic fallback", exc)
-                    continue
-                ok_blocks += 1
-                for el in elements:
-                    o = oi + el.get("originIndex", 0)
-                    d = di + el.get("destinationIndex", 0)
-                    if o == d or el.get("condition") != "ROUTE_EXISTS" or not el.get("duration"):
+
+        def fetch(a: int, b: int):  # noqa: ANN202
+            return self._request_with_retry([locations[k] for k in groups[a]], [locations[k] for k in groups[b]],
+                                            departure, deadline)
+
+        from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
+
+        pending = list(pairs)
+        running: dict = {}
+        with ThreadPoolExecutor(max(1, self.workers)) as ex:
+            while pending or running:
+                while pending and len(running) < self.workers and not fatal and time.monotonic() < deadline \
+                        and requests + len(running) < self.max_requests:
+                    a, b = pending.pop(0)
+                    running[ex.submit(fetch, a, b)] = (a, b)
+                if not running:
+                    break
+                done, _ = wait(list(running), return_when=FIRST_COMPLETED)
+                for fut in done:
+                    a, b = running.pop(fut)
+                    try:
+                        elements, tries = fut.result()
+                        requests += tries
+                    except _FatalRouteError as exc:
+                        fatal = str(exc)
+                        failed_blocks += 1
+                        log.error("Routes API rejected the request: %s", exc)
                         continue
-                    # Add the same parking / door overhead the synthetic model uses.
-                    minutes[o][d] = float(el["duration"].rstrip("s")) / 60.0 + self.fallback.config.per_trip_overhead_min  # type: ignore[attr-defined]
-                    km[o][d] = el.get("distanceMeters", 0) / 1000.0
-                    filled += 1
-                time.sleep(self.pace_s)
+                    except Exception as exc:  # noqa: BLE001 - this block keeps the synthetic estimate
+                        failed_blocks += 1
+                        key = type(exc).__name__ + (f" {getattr(exc, 'code', '')}" if hasattr(exc, "code") else "")
+                        errors[key] = errors.get(key, 0) + 1
+                        continue
+                    ok_blocks += 1
+                    for el in elements:
+                        o = groups[a][el.get("originIndex", 0)]
+                        d = groups[b][el.get("destinationIndex", 0)]
+                        if o == d or el.get("condition") != "ROUTE_EXISTS" or not el.get("duration"):
+                            continue
+                        # Add the same parking / door overhead the synthetic model uses.
+                        minutes[o][d] = float(el["duration"].rstrip("s")) / 60.0 + self.fallback.config.per_trip_overhead_min  # type: ignore[attr-defined]
+                        km[o][d] = el.get("distanceMeters", 0) / 1000.0
+                        filled += 1
+                    if self.progress:
+                        self.progress(f"Google Routes: {ok_blocks + failed_blocks}/{len(pairs)} blocks "
+                                      f"({filled} trips)")
+                if self.pace_s:
+                    time.sleep(self.pace_s)
+            skipped = len(pending)
 
         total = n * (n - 1)
         if ok_blocks == 0:
             source = "synthetic (google-routes unavailable)"
-        elif failed_blocks:
+        elif failed_blocks or skipped:
             source = "google-routes+synthetic-fallback"
         else:
             source = "google-routes"
-        notes = [f"{filled}/{total} elements from Routes API; {ok_blocks} blocks ok, {failed_blocks} failed ({requests} HTTP requests)"]
+        notes = [f"{filled}/{total} trips from Routes API, closest pairs first; {ok_blocks} blocks ok, "
+                 f"{failed_blocks} failed, {skipped} over the {int(self.budget_s)} s budget use the synthetic estimate "
+                 f"({requests} HTTP requests)"]
         if errors:
             notes.append("errors: " + ", ".join(f"{k} x{v}" for k, v in errors.items()))
         if fatal:
             notes.append(f"Routes API rejected the key/request: {fatal}")
         result = BaseMatrix(location_ids=[loc.id for loc in locations], minutes=minutes, km=km, source=source, notes=notes)
-        if source == "google-routes":  # only complete matrices are cached
+        if ok_blocks and not fatal:  # partial matrices are cached too (labelled), so a seed is fetched once
             path.write_text(json.dumps({"minutes": minutes, "km": km, "source": source, "notes": notes}))
         return result
 
-    def _request_with_retry(self, origins: list[Location], dests: list[Location], departure: str) -> tuple[list[dict], int]:
-        """Retry rate limits / transient errors with exponential backoff (honours Retry-After)."""
+    def _request_with_retry(self, origins: list[Location], dests: list[Location], departure: str,
+                            deadline: float | None = None) -> tuple[list[dict], int]:
+        """Retry rate limits / transient errors with exponential backoff (honours Retry-After),
+        but never past the time budget."""
         delay = 2.0
         for attempt in range(1, self.max_retries + 2):
+            if deadline is not None and attempt > 1 and time.monotonic() > deadline:
+                raise TimeoutError("time budget exhausted")
             try:
                 return self._request(origins, dests, departure), attempt
             except urllib.error.HTTPError as exc:
@@ -158,6 +198,8 @@ class GoogleRoutesTravelTimeProvider(TravelTimeProvider):
                 if attempt > self.max_retries:
                     raise
                 wait = delay
+            if deadline is not None and time.monotonic() + wait > deadline:
+                raise TimeoutError("time budget exhausted while rate limited")
             time.sleep(min(wait, 60.0))
             delay *= 2
         raise RuntimeError("unreachable")

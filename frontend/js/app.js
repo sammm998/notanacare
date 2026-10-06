@@ -506,7 +506,7 @@ function wire() {
     const btn = e.target.querySelector("button");
     btn.disabled = true;
     try {
-      indexScenario(await api("POST", "/api/scenarios", body));
+      indexScenario(await runJob(api("POST", "/api/scenarios?background=true", body), "Generating scenario"));
       state.plan = state.parent = state.lastIncident = null;
       setBadge("#b-valid", "not validated", "muted");
       $("#f-incident button").disabled = true;

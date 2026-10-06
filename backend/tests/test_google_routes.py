@@ -87,3 +87,28 @@ def test_road_geometry_straight_without_key_and_parsed_with_key(monkeypatch):
     assert len(out["legs"]) == 3
     assert out["legs"][0]["path"][0] == [59.3, 18.0]  # lat/lng order restored
     assert out["legs"][1]["distance_m"] == 0  # duplicate point: no request
+
+
+def test_time_budget_fetches_closest_pairs_first_and_returns(tmp_path, monkeypatch):
+    # Two zones far apart, 25 locations each -> 4 blocks; the budget allows ~2.
+    locs = [Location(f"a{i}", 59.30 + i * 1e-4, 18.00, "A") for i in range(25)]
+    locs += [Location(f"b{i}", 59.60 + i * 1e-4, 18.60, "B") for i in range(25)]
+    clock = {"t": 0.0}
+    monkeypatch.setattr(G.time, "monotonic", lambda: clock["t"])
+    monkeypatch.setattr(G.time, "sleep", lambda s: None)
+    seen = []
+
+    def slow_ok(req, timeout=None):
+        body = json.loads(req.data)
+        seen.append((body["origins"][0]["waypoint"]["location"]["latLng"]["latitude"] > 59.5,
+                     body["destinations"][0]["waypoint"]["location"]["latLng"]["latitude"] > 59.5))
+        clock["t"] += 30.0  # each request "takes" 30 s
+        return _ok(req)
+
+    monkeypatch.setattr(G.urllib.request, "urlopen", slow_ok)
+    p = G.GoogleRoutesTravelTimeProvider(api_key="test", cache_dir=tmp_path, pace_s=0, budget_s=50, workers=1)
+    m = p.build_matrix(locs)
+    assert m.source == "google-routes+synthetic-fallback"
+    assert all(o == d for o, d in seen[:2]), "within-zone blocks come first"
+    assert "over the 50 s budget" in m.notes[0]
+    assert m.minutes[0][1] == pytest.approx(10.0 + p.fallback.config.per_trip_overhead_min)  # from Google

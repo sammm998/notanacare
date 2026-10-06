@@ -259,7 +259,10 @@ Independent validation: VALID (0 hard violations, 0 warnings).
 `TravelTimeProvider` → `SyntheticTravelTimeProvider` (Haversine × 1.35 routing factor at 24 km/h +
 3 min parking/door overhead) or `GoogleRoutesTravelTimeProvider` (Routes API `computeRouteMatrix`,
 25×25 blocks, `TRAFFIC_AWARE`, one matrix per departure hour, disk cache, per-element synthetic
-fallback). The solver never calls an API: it reads a precomputed location matrix, and `TrafficConditions`
+fallback). The Routes API allows ~3,000 elements/minute and a 165-address day is ~27,000, so a matrix
+has a **time budget** (`NOTANA_GOOGLE_BUDGET_S`, default 60 s): blocks are grouped by zone and requested
+closest pairs first (3 in parallel), the far pairs keep the synthetic estimate, and the travel badge says
+how many trips came from Google. Scenario generation runs as a background job with progress. The solver never calls an API: it reads a precomputed location matrix, and `TrafficConditions`
 (global / zone / corridor multipliers) are layered on top for incidents. The header shows the active source.
 
 ### Optional AI layers, and what they must not do

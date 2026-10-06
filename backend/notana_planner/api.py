@@ -284,24 +284,48 @@ def meta() -> dict:
 
 
 @app.post("/api/scenarios")
-def create_scenario(body: ScenarioIn) -> dict:
+def create_scenario(body: ScenarioIn, background: bool = False) -> dict:
+    """Generate a day (or week). With ``background=true`` it runs as a job: building
+    the travel matrix with Google Routes can take up to its time budget (60 s)."""
     cfg = ScenarioConfig(**{k: v for k, v in body.model_dump().items() if k != "travel_provider"})
     if cfg.area not in AREAS:
         raise HTTPException(400, f"unknown area {cfg.area}")
+    if background:
+        def work(job: dict) -> dict:
+            return _create(cfg, body.travel_provider, job["progress"].append)
+
+        return submit("scenario", work)
+    return _create(cfg, body.travel_provider)
+
+
+def _provider(name: str, progress=None):  # noqa: ANN001, ANN202
+    prov = make_provider(name)
+    if progress is not None and hasattr(prov, "progress"):
+        prov.progress = progress
+        progress("building the travel-time matrix with Google Routes (closest pairs first, max "
+                 f"{int(getattr(prov, 'budget_s', 60))} s)")
+    return prov
+
+
+def _create(cfg: ScenarioConfig, travel_provider: str, progress=None) -> dict:  # noqa: ANN001
     if cfg.days > 1:
-        return create_week(cfg, body.travel_provider)
+        return create_week(cfg, travel_provider, progress)
+    if progress:
+        progress("generating interventions, visits and staff")
     sc = generate_scenario(cfg, scenario_id="S-" + uuid.uuid4().hex[:8])
-    world = World.create(sc, provider=make_provider(body.travel_provider))
+    world = World.create(sc, provider=_provider(travel_provider, progress))
     s = Session(sc.id, world)
     STORE.add(s)
     DB.save_scenario(sc.id, to_jsonable(cfg), scenario_payload(s)["counts"])
     return scenario_payload(s)
 
 
-def create_week(cfg: ScenarioConfig, travel_provider: str) -> dict:
+def create_week(cfg: ScenarioConfig, travel_provider: str, progress=None) -> dict:  # noqa: ANN001
     wid = "W-" + uuid.uuid4().hex[:8]
+    if progress:
+        progress("generating Monday to Sunday")
     scenarios = generate_week(cfg, scenario_id=wid)
-    first = World.create(scenarios[0], provider=make_provider(travel_provider))
+    first = World.create(scenarios[0], provider=_provider(travel_provider, progress))
     WEEKS[wid] = [sc.id for sc in scenarios]
     for sc in scenarios:
         # Same addresses every day: one travel matrix for the week.
