@@ -219,22 +219,23 @@ API key is set, and notes that a single seed is indicative rather than statistic
 
 ### Measured result (default scenario, seed 42, no API key)
 
-Baseline day plan: **568 / 587 visits planned, 19 unplanned (each explained), VALID**.
-Incident chain: 2 employees sick at 10:14 → Södermalm traffic ×1.6 at 10:34 → a 25-min delay at
-10:44 → a medication moved at 10:54.
+Baseline day plan: **565 / 587 visits planned, 22 unplanned (each explained), VALID** (wishes and
+Arbetstidslagen on). Incident chain: 2 employees sick at 10:14 → Södermalm traffic ×1.6 at 10:34 → a
+25-min delay at 10:44 → a medication moved at 10:54.
 
 | Strategy | Unplanned at end | Lost vs base plan | Hard violations | Travel (min) | Changed assignments | Changed start times | Re-plan runtime |
 |---|---|---|---|---|---|---|---|
-| A. Baseline optimizer | 28 | 10 | 0 | 7,817 | 62 | 126 | 78 s |
-| B. + enhanced repair | 22 | 6 | 0 | 7,971 | 76 | 164 | 65 s |
-| C. + advisor (deterministic fallback) | 22 | 6 | 0 | 7,971 | 76 | 164 | 61 s |
-| D. + mock classifier ranking | 23 | 7 | 0 | 7,959 | 69 | 150 | 99 s |
+| A. Baseline optimizer | 39 | 20 | 0 | 8,602 | 68 | 115 | 120 s |
+| B. + enhanced repair | 38 | 20 | 0 | 8,686 | 62 | 120 | 60 s |
+| C. + advisor (deterministic fallback) | 30 | 17 | 0 | 8,859 | 107 | 189 | 57 s |
+| D. + mock classifier ranking | 29 | 15 | 0 | 8,811 | 80 | 147 | 100 s |
 
-Reading it honestly: the deterministic **ejection-chain repair (B)** keeps about 6 more visits planned
-than A, at the cost of more travel and more reassignments. **C** is identical to B here, because without
-an API key the deterministic advisor only switched on the same repair. **D**'s mock classifier explores
-every phase (slower) and lands between A and B. This is one seed, so nothing here shows that an AI
-component helps. The mode exists to measure exactly that once a real LLM/JEV component is attached.
+Reading it honestly: two sick employees in a tight day cost 15–20 communicated visits in every
+strategy, mostly double-staffed visits whose partner cannot be replaced. **C** and **D** keep 8–10 more
+visits planned than A, at the cost of more travel and many more changed assignments. Neither used an
+LLM or a trained model here: C ran the deterministic advisor (it chose a broader repair) and D the
+transparent mock ranking. This is one seed, so nothing here shows that an AI component helps. The mode
+exists to measure exactly that once a real LLM/JEV component is attached.
 
 ---
 
