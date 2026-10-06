@@ -33,7 +33,11 @@ async function boot() {
   if (!window.L) await new Promise((r) => window.addEventListener("load", r, { once: true }));
   const provider = await initMap($("#map"), state.meta.map, {
     onRecipient, onVisit: openVisit, onEmployee: selectEmployee, rerender: render,
-    onProviderFallback: (msg) => { toast(msg, 8000); setBadge("#map-provider", "map: OpenStreetMap", "muted"); },
+    onProviderFallback: (msg, code) => {
+      toast(msg, 15000);
+      setBadge("#map-provider", `map: OpenStreetMap${code ? ` (Google: ${code})` : ""}`, "warn");
+      $("#map-provider").title = msg;
+    },
   });
   setBadge("#map-provider", provider === "google" ? "map: Google Maps" : "map: OpenStreetMap", provider === "google" ? "ok" : "muted");
   if (!state.meta.map?.road_geometry) $("#lbl-roads").classList.add("hidden");

@@ -130,11 +130,42 @@ let mapEl = null;
 let handlers = {};
 const geometryCache = new Map();
 
+// Google reports the reason for a rejected key only on the console
+// ("Google Maps JavaScript API error: RefererNotAllowedMapError ..."). Capture it.
+const GM_HELP = {
+  RefererNotAllowedMapError: "add this site's URL (https://<your-app>.up.railway.app/*) under the key's Website restrictions",
+  ApiNotActivatedMapError: "enable \"Maps JavaScript API\" in Google Cloud for this project",
+  ApiTargetBlockedMapError: "the key's API restrictions must include \"Maps JavaScript API\"",
+  InvalidKeyMapError: "the key is wrong – check GOOGLE_MAPS_BROWSER_KEY in Railway",
+  MissingKeyMapError: "GOOGLE_MAPS_BROWSER_KEY is empty",
+  ExpiredKeyMapError: "the key has expired – create a new one",
+  BillingNotEnabledMapError: "enable billing on the Google Cloud project",
+  DeletedApiProjectMapError: "the key's Google Cloud project was deleted",
+};
+export const gmError = { code: null, text: null };
+(() => {
+  const orig = console.error.bind(console);
+  console.error = (...args) => {
+    const msg = args.map(String).join(" ");
+    const m = msg.match(/([A-Za-z]+MapError)/);
+    if (m && /Google Maps/i.test(msg)) {
+      gmError.code = m[1];
+      gmError.text = msg.split("\n")[0];
+    }
+    orig(...args);
+  };
+})();
+export function gmErrorMessage() {
+  const code = gmError.code;
+  if (!code) return "Google Maps rejected the browser key (no error code reported)";
+  return `Google Maps: ${code} – ${GM_HELP[code] || "see developers.google.com/maps/documentation/javascript/error-messages"}`;
+}
+
 function loadGoogle(key) {
   return new Promise((resolve, reject) => {
     if (window.google?.maps) return resolve();
     window.__notanaGmReady = resolve;
-    window.gm_authFailure = () => reject(new Error("Google Maps rejected the browser key"));
+    window.gm_authFailure = () => setTimeout(() => reject(new Error(gmErrorMessage())), 50);
     const s = document.createElement("script");
     s.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(key)}&v=weekly&callback=__notanaGmReady`;
     s.async = true;
@@ -154,11 +185,18 @@ export async function initMap(el, cfg, h) {
       await loadGoogle(cfg.browser_key);
       adapter = new GoogleAdapter(el, center);
       window.gm_authFailure = () => {
-        // Key rejected after load (wrong referrer / API not enabled): switch to Leaflet.
-        el.innerHTML = "";
-        adapter = new LeafletAdapter(el, center);
-        handlers.onProviderFallback?.("Google Maps rejected the browser key – showing OpenStreetMap instead");
-        handlers.rerender?.();
+        // Key rejected after load (wrong referrer / API not enabled): switch back to
+        // the OpenStreetMap map. The console message with the code arrives right after.
+        setTimeout(() => {
+          const fresh = document.createElement("div");
+          fresh.id = el.id;
+          fresh.style.cssText = el.style.cssText;
+          el.replaceWith(fresh);
+          mapEl = fresh;
+          adapter = new LeafletAdapter(fresh, center);
+          handlers.onProviderFallback?.(`${gmErrorMessage()}. Showing OpenStreetMap instead.`, gmError.code);
+          handlers.rerender?.();
+        }, 50);
       };
       return "google";
     } catch (e) {

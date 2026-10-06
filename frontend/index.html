@@ -25,7 +25,7 @@
     <aside class="sidebar">
       <details open class="card">
         <summary>1 · Scenario (synthetic data)</summary>
-        <form id="f-scenario" class="form">
+        <form id="f-scenario" onsubmit="return false" class="form">
           <label>Seed <input name="seed" type="number" value="42" /></label>
           <label>Interventions <input name="target_interventions" type="number" value="5000" min="100" max="12000" step="100" /></label>
           <label>Employees <input name="employee_count" type="number" value="100" min="2" max="300" /></label>
@@ -44,7 +44,7 @@
 
       <details open class="card">
         <summary>2 · Optimise the day</summary>
-        <form id="f-plan" class="form">
+        <form id="f-plan" onsubmit="return false" class="form">
           <label>Strategy <select name="strategy" id="sel-strategy"></select></label>
           <label>Time limit (s) <input name="time_limit_s" type="number" value="25" min="2" max="300" /></label>
           <label>Approved overtime (min) <input name="max_overtime_min" type="number" value="0" min="0" max="120" /></label>
@@ -55,7 +55,7 @@
 
       <details open class="card">
         <summary>3 · Real-time incidents</summary>
-        <form id="f-incident" class="form">
+        <form id="f-incident" onsubmit="return false" class="form">
           <label>Clock <input name="clock" type="time" value="10:14" step="60" /></label>
           <label>Incident <select name="kind" id="sel-incident">
             <option value="employee_sick">Employee calls in sick</option>
@@ -117,7 +117,7 @@
       <section class="tab hidden" id="tab-replan"><div id="replan"></div></section>
       <section class="tab hidden" id="tab-score"><div id="score"></div></section>
       <section class="tab hidden" id="tab-experiments">
-        <form id="f-exp" class="form inline">
+        <form id="f-exp" onsubmit="return false" class="form inline">
           <label>Seed <input name="seed" type="number" value="42" /></label>
           <label>Interventions <input name="target_interventions" type="number" value="5000" step="100" /></label>
           <label>Employees <input name="employee_count" type="number" value="100" /></label>
