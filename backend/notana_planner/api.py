@@ -60,6 +60,7 @@ _threading.Thread(target=lambda: selector(ML_STORE).train(evaluate_cv=True), dae
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 # Which code is running: Railway sets RAILWAY_GIT_COMMIT_SHA for every deployment.
+STARTED_AT = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 VERSION = (os.environ.get("RAILWAY_GIT_COMMIT_SHA") or os.environ.get("GIT_COMMIT") or "dev")[:7]
 FEATURES = ["week", "wishes", "atl", "lns", "suggestions", "live", "alarm", "vab", "ml", "documentation"]
 
@@ -257,6 +258,7 @@ def health() -> dict:
         "classifier": "mock-linear (no JEV SDK available)",
         "sessions": len(STORE.sessions),
         "version": VERSION,
+        "started_at": STARTED_AT,
         "features": FEATURES,
     }
 
@@ -399,7 +401,7 @@ def _session(sid: str) -> Session:
     try:
         return STORE.get(sid)
     except KeyError:
-        raise HTTPException(404, "unknown scenario (sessions are in memory; regenerate from the seed)") from None
+        raise HTTPException(404, "unknown scenario: the server restarted or was redeployed, which clears in-memory sessions; regenerate from the seed") from None
 
 
 def _plan(pid: str) -> tuple[Session, Plan]:

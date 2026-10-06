@@ -76,7 +76,7 @@ async function showPlan(pid) {
     await loadPlan(pid);
     render();
   } catch (err) {
-    toast(err.message);
+    handleError(err);
   }
 }
 
@@ -86,7 +86,7 @@ const conflictActions = {
       state.suggestions = await runJob(api("POST", `/api/plans/${state.plan.id}/suggestions`), "Finding solutions");
       render();
     } catch (err) {
-      toast(err.message, 8000);
+      handleError(err);
     }
   },
   async autofix() {
@@ -98,7 +98,7 @@ const conflictActions = {
       render();
       toast(`${r.net_planned_gain} more visit(s) planned within the rules · ${r.unplanned_after} still unplanned`, 8000);
     } catch (err) {
-      toast(err.message, 8000);
+      handleError(err);
     }
   },
   async apply(opt) {
@@ -121,7 +121,7 @@ const conflictActions = {
       render();
       toast(r.status === "VALID" ? "Applied within the rules: plan VALID" : r.valid ? "Applied as an approved exception (still reported by the validator)" : `Applied, but the plan is ${r.status}`, 8000);
     } catch (err) {
-      toast(err.message, 8000);
+      handleError(err);
     }
   },
 };
@@ -135,7 +135,7 @@ async function startLive() {
   try {
     job = await api("POST", `/api/scenarios/${state.scenario.id}/live`, body);
   } catch (err) {
-    return toast(err.message, 8000);
+    return handleError(err);
   }
   state.live = { job: job.job_id, feed: [] };
   $("#btn-live").disabled = true;
@@ -211,7 +211,7 @@ async function selectDay(sid) {
     }
     render();
   } catch (err) {
-    toast(err.message);
+    handleError(err);
   }
 }
 
@@ -228,13 +228,13 @@ async function planWeek() {
   const btn = $("#btn-plan-week");
   btn.disabled = true;
   try {
-    const res = await runJob(api("POST", `/api/weeks/${wk.id}/plan`, planBody()), "Optimising week");
+    const res = await withSession(() => runJob(api("POST", `/api/weeks/${state.scenario.week.id}/plan`, planBody()), "Optimising week"));
     await loadWeek();
     await selectDay(state.scenario.id);
     switchTab("week");
     toast(`Week optimised: ${state.week.totals.planned} of ${state.week.totals.visits} visits planned · days ${res.valid ? "VALID" : "with violations"} · week rules ${state.week.validation.valid ? "OK" : "VIOLATED"}`, 8000);
   } catch (err) {
-    toast(err.message, 8000);
+    handleError(err);
   } finally {
     btn.disabled = false;
   }
@@ -255,6 +255,46 @@ async function loadPlan(pid) {
     if (cur < state.plan.clock) $("#f-incident [name=clock]").value = hhmm(state.plan.clock + 5);
   }
   renderIncidentFields();
+}
+
+// The server keeps sessions in memory: a restart or redeploy loses them. Scenarios
+// are deterministic from their configuration, so regenerate the same one and retry.
+const CONFIG_KEYS = ["seed", "target_interventions", "employee_count", "area", "staffing_pressure", "double_staffing_pct",
+  "strict_window_pct", "skill_requirement_pct", "travel_time_multiplier", "double_staffing_sync_tolerance",
+  "breaks_enabled", "preferences_enabled", "days"];
+
+function isLostSession(err) {
+  return /unknown (scenario|plan|week)|evicted/i.test(err?.message || "");
+}
+
+async function regenerateScenario() {
+  const cfg = state.scenario?.config || {};
+  const body = Object.fromEntries(CONFIG_KEYS.filter((k) => cfg[k] !== undefined).map((k) => [k, cfg[k]]));
+  body.travel_provider = $("#f-scenario [name=travel_provider]").value;
+  toast(`The server restarted (in-memory sessions are cleared on a restart or redeploy). Regenerating the same scenario from seed ${cfg.seed}…`, 8000);
+  indexScenario(await runJob(api("POST", "/api/scenarios?background=true", body), "Regenerating scenario"));
+  state.plan = state.parent = state.lastIncident = state.suggestions = state.autofix = null;
+  setBadge("#b-valid", "not validated", "muted");
+}
+
+async function withSession(fn) {
+  try {
+    return await fn();
+  } catch (err) {
+    if (!isLostSession(err) || !state.scenario) throw err;
+    await regenerateScenario();
+    return fn();
+  }
+}
+
+function handleError(err, ms = 8000) {
+  if (isLostSession(err) && state.scenario) {
+    regenerateScenario()
+      .then(() => { render(); toast("Scenario regenerated after the server restart. Optimise the day again to continue.", 10000); })
+      .catch((e) => toast(e.message, 10000));
+    return;
+  }
+  toast(err.message, ms);
 }
 
 async function refreshScenario() {
@@ -514,7 +554,7 @@ function wire() {
       $("#kpis").innerHTML = `<div class="empty">${state.scenario.week ? "Week ready (Mon–Sun). Monday: " : "Scenario ready: "} ${state.scenario.counts.visits} visits built from ${state.scenario.counts.interventions} interventions (${state.scenario.counts.double_staffed} double-staffed, ${state.scenario.counts.hard_windows} hard windows, ${state.scenario.counts.with_requirements} with skill/delegation requirements; ${Math.round(state.scenario.counts.care_minutes / 60)} care hours). ${state.scenario.week ? "Optimise one day, or the whole week with the button above." : "Now optimise the day."}</div>`;
       render();
     } catch (err) {
-      toast(err.message);
+      handleError(err);
     } finally {
       btn.disabled = false;
     }
@@ -526,7 +566,7 @@ function wire() {
       state.ml = await runJob(api("POST", "/api/ml/train"), "Training");
       renderML($("#ml"), state.ml);
     } catch (err) {
-      toast(err.message, 8000);
+      handleError(err);
     }
   });
   $("#btn-ml-cases").addEventListener("click", async () => {
@@ -536,7 +576,7 @@ function wire() {
       renderML($("#ml"), state.ml);
       toast(`${state.ml.added} new cases from this scenario; model retrained on ${state.ml.cases_total} cases`, 8000);
     } catch (err) {
-      toast(err.message, 8000);
+      handleError(err);
     }
   });
   $("#f-live").addEventListener("submit", (e) => { e.preventDefault(); startLive(); });
@@ -547,7 +587,7 @@ function wire() {
     const btn = f.querySelector("button");
     btn.disabled = true;
     try {
-      const res = await runJob(api("POST", `/api/scenarios/${state.scenario.id}/plan`, planBody()), "Optimising");
+      const res = await withSession(() => runJob(api("POST", `/api/scenarios/${state.scenario.id}/plan`, planBody()), "Optimising"));
       await refreshScenario();
       state.autofix = null;
       await loadPlan(res.plan_id);
@@ -555,7 +595,7 @@ function wire() {
       render();
       toast(res.valid ? "Plan optimised and independently validated: VALID" : "Plan produced but validation FAILED – see Score & validation");
     } catch (err) {
-      toast(err.message, 8000);
+      handleError(err);
     } finally {
       btn.disabled = false;
     }
@@ -568,7 +608,7 @@ function wire() {
     try {
       params = incidentParams(f);
     } catch (err) {
-      return toast(err.message);
+      return handleError(err);
     }
     const btn = f.querySelector("button");
     btn.disabled = true;
@@ -582,7 +622,7 @@ function wire() {
       switchTab("replan");
       toast(`${res.diff_counts.visits_changed} visits changed · ${res.strategy_used}`);
     } catch (err) {
-      toast(err.message, 8000);
+      handleError(err);
     } finally {
       btn.disabled = false;
     }
