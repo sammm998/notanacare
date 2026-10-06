@@ -1,12 +1,12 @@
 import { api, runJob } from "./api.js";
-import { renderGantt } from "./gantt.js";
-import { initMap, invalidate, onVisitClick, renderMap } from "./map.js";
+import { changedVisits, renderGantt } from "./gantt.js";
+import { initMap, invalidate, renderItinerary, renderMap, renderTeamLegend } from "./map.js";
 import { renderConflicts, renderExperiment, renderHistory, renderKpis, renderReplan, renderScore, renderVisit } from "./panels.js";
 import { $, $$, esc, hhmm, parseHHMM, toast } from "./util.js";
 
 const state = {
   meta: null, health: null, scenario: null, plan: null, parent: null, lastIncident: null,
-  visitsById: {}, empsById: {}, tab: "map", selectedEmp: "", selectedVisit: null,
+  visitsById: {}, empsById: {}, tab: "map", selectedEmp: "", selectedVisit: null, mapMode: "employee",
 };
 
 // ------------------------------------------------------------------ boot
@@ -30,7 +30,13 @@ async function boot() {
   });
   wire();
   renderIncidentFields();
-  if (window.L) initMap(onRecipient); else window.addEventListener("load", () => initMap(onRecipient));
+  if (!window.L) await new Promise((r) => window.addEventListener("load", r, { once: true }));
+  const provider = await initMap($("#map"), state.meta.map, {
+    onRecipient, onVisit: openVisit, onEmployee: selectEmployee, rerender: render,
+    onProviderFallback: (msg) => { toast(msg, 8000); setBadge("#map-provider", "map: OpenStreetMap", "muted"); },
+  });
+  setBadge("#map-provider", provider === "google" ? "map: Google Maps" : "map: OpenStreetMap", provider === "google" ? "ok" : "muted");
+  if (!state.meta.map?.road_geometry) $("#lbl-roads").classList.add("hidden");
 }
 
 function setBadge(sel, text, cls) {
@@ -46,7 +52,9 @@ function indexScenario(sc) {
   state.empsById = Object.fromEntries(sc.employees.map((e) => [e.id, e]));
   setBadge("#b-scenario", `${sc.area} · ${sc.counts.interventions} interventions → ${sc.counts.visits} visits · ${sc.counts.recipients} recipients · ${sc.counts.employees} employees`, "muted");
   setBadge("#b-travel", `travel: ${sc.travel.source}${sc.travel.traffic.global_multiplier !== 1 || Object.keys(sc.travel.traffic.zone_multipliers).length ? " + traffic" : ""}`, sc.travel.source.startsWith("google") ? "ok" : "muted");
-  $("#sel-emp").innerHTML = '<option value="">— all routes (faint) —</option>' + sc.employees.map((e) => `<option value="${e.id}">${esc(e.id)} · ${esc(e.name)}</option>`).join("");
+  $("#b-travel").title = (sc.travel.notes || []).join("\n") || "Active travel-time source";
+  $("#sel-emp").innerHTML = sc.employees.map((e) => `<option value="${e.id}">${esc(e.id)} · ${esc(e.name)} · ${esc(e.team)}</option>`).join("");
+  $("#sel-map-team").innerHTML = sc.zones.map((z) => `<option>${esc(z)}</option>`).join("");
   $("#sel-team").innerHTML = '<option value="">all teams</option>' + sc.zones.map((z) => `<option>${esc(z)}</option>`).join("");
   $("#f-plan button").disabled = false;
 }
@@ -81,7 +89,7 @@ function render() {
     render();
   });
   const t = state.tab;
-  if (t === "map") renderMap(state, state.selectedEmp, $("#chk-routes").checked);
+  if (t === "map") renderMapTab();
   if (t === "timeline") renderGantt($("#gantt"), state, {
     team: $("#sel-team").value, sort: $("#sel-sort").value, onlyChanged: $("#chk-changed").checked, selectedVisit: state.selectedVisit,
   }, openVisit, selectEmployee);
@@ -90,10 +98,62 @@ function render() {
   if (t === "score") renderScore($("#score"), state.plan);
 }
 
+function employeesWithRoutes() {
+  const plan = state.plan;
+  if (!plan) return [];
+  return state.scenario.employees.filter((e) => plan.routes[e.id]?.stops.some((s) => s.kind === "visit")).map((e) => e.id);
+}
+
+function ensureSelectedEmployee() {
+  const ids = employeesWithRoutes();
+  if (ids.length && !ids.includes(state.selectedEmp)) {
+    // Start with the busiest employee: the clearest first example of a day.
+    const n = (e) => state.plan.routes[e].stops.filter((s) => s.kind === "visit").length;
+    state.selectedEmp = ids.reduce((a, b) => (n(b) > n(a) ? b : a), ids[0]);
+  }
+  if (state.selectedEmp) $("#sel-emp").value = state.selectedEmp;
+}
+
+function setMapMode(mode, persist = true) {
+  if (persist) state.mapMode = mode;
+  $$("#map-mode button").forEach((b) => b.classList.toggle("active", b.dataset.mode === mode));
+  $$("#tab-map [data-for]").forEach((el) => el.classList.toggle("hidden", el.dataset.for !== mode || (el.id === "lbl-roads" && !state.meta.map?.road_geometry)));
+}
+
+function renderMapTab() {
+  setMapMode(state.plan ? state.mapMode : "all", false); // without a plan only the overview exists
+  const side = $("#map-side");
+  if (state.plan && state.mapMode === "employee") ensureSelectedEmployee();
+  if (!state.plan) side.innerHTML = '<div class="hint">Recipients are shown. Optimise the day to see each employee\'s route.</div>';
+  else if (state.mapMode === "all") {
+    const n = Object.keys(state.plan.unplanned).length;
+    side.innerHTML = `<div class="it-head"><b>Overview</b><div class="hint">Every care recipient: green = all visits planned, red = at least one visit unplanned (${n} visits). Black houses are team offices. Switch to <b>One employee's day</b> to follow a route stop by stop.</div></div>`;
+  }
+  renderMap(state, {
+    mode: state.plan ? state.mapMode : "all",
+    employee: state.selectedEmp,
+    team: $("#sel-map-team").value,
+    followRoads: $("#chk-roads").checked && !!state.meta.map?.road_geometry,
+    showAll: $("#chk-routes").checked,
+    changed: changedVisits(state.plan, state.parent),
+    selectedVisit: state.selectedVisit,
+    onGeometry: (src) => renderItinerary(side, state, state.selectedEmp, src, openVisit),
+    onTeam: (list) => renderTeamLegend(side, list, selectEmployee),
+  });
+}
+
 function selectEmployee(eid) {
   state.selectedEmp = eid;
   $("#sel-emp").value = eid;
+  setMapMode("employee");
   switchTab("map");
+}
+
+function stepEmployee(delta) {
+  const ids = employeesWithRoutes();
+  if (!ids.length) return;
+  const i = Math.max(0, ids.indexOf(state.selectedEmp));
+  selectEmployee(ids[(i + delta + ids.length) % ids.length]);
 }
 
 function onRecipient(rid) {
@@ -210,10 +270,14 @@ function wire() {
   $("#drawer-close").addEventListener("click", () => $("#drawer").classList.add("hidden"));
   $("#sel-emp").addEventListener("change", (e) => { state.selectedEmp = e.target.value; render(); });
   $("#chk-routes").addEventListener("change", render);
+  $("#chk-roads").addEventListener("change", render);
+  $("#sel-map-team").addEventListener("change", render);
+  $("#btn-prev-emp").addEventListener("click", () => stepEmployee(-1));
+  $("#btn-next-emp").addEventListener("click", () => stepEmployee(1));
+  $$("#map-mode button").forEach((b) => b.addEventListener("click", () => { setMapMode(b.dataset.mode); render(); }));
   for (const id of ["#sel-team", "#sel-sort", "#chk-changed"]) $(id).addEventListener("change", render);
   $("#sel-incident").addEventListener("change", () => renderIncidentFields());
   $("#f-incident [name=clock]").addEventListener("change", () => renderIncidentFields());
-  onVisitClick(openVisit);
 
   $("#f-scenario").addEventListener("submit", async (e) => {
     e.preventDefault();

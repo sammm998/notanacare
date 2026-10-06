@@ -85,11 +85,24 @@
       </nav>
       <section class="tab" id="tab-map">
         <div class="toolbar">
-          <label>Employee <select id="sel-emp"><option value="">— all routes (faint) —</option></select></label>
-          <label class="check"><input type="checkbox" id="chk-routes" checked /> show routes</label>
-          <span class="legend"><i class="dot ok"></i>all visits planned <i class="dot warn"></i>some unplanned <i class="sq"></i>team office</span>
+          <div class="seg" id="map-mode" role="tablist">
+            <button data-mode="employee" class="active">One employee's day</button>
+            <button data-mode="team">Team</button>
+            <button data-mode="all">Overview</button>
+          </div>
+          <label data-for="employee">Employee <select id="sel-emp"></select></label>
+          <button data-for="employee" id="btn-prev-emp" title="Previous employee">‹</button>
+          <button data-for="employee" id="btn-next-emp" title="Next employee">›</button>
+          <label data-for="employee" class="check" id="lbl-roads"><input type="checkbox" id="chk-roads" checked /> follow roads</label>
+          <label data-for="team" class="hidden">Team <select id="sel-map-team"></select></label>
+          <label data-for="all" class="check hidden"><input type="checkbox" id="chk-routes" /> all routes (faint)</label>
+          <span class="legend"><i class="dot ok"></i>planned <i class="dot warn"></i>has unplanned visits <span class="pin">3</span> visit order <span class="pin dbl">2</span> double-staffed <span class="pin chg">4</span> changed by re-plan <span class="pin office">⌂</span> team office</span>
+          <span id="map-provider" class="badge muted"></span>
         </div>
-        <div id="map"></div>
+        <div class="map-wrap">
+          <div id="map"></div>
+          <aside id="map-side" class="map-side"><div class="hint">Optimise a plan, then pick an employee to see their day in order.</div></aside>
+        </div>
       </section>
       <section class="tab hidden" id="tab-timeline">
         <div class="toolbar">

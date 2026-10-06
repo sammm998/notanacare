@@ -203,6 +203,13 @@ def meta() -> dict:
         "skills": list(C.SKILLS),
         "delegations": list(C.DELEGATIONS),
         "intervention_types": {t.key: t.label for t in C.INTERVENTION_TYPES},
+        # The browser key is public by nature: restrict it to Maps JavaScript API and
+        # to this site's URL (HTTP referrer) in Google Cloud. Never the server key.
+        "map": {
+            "provider": "google" if os.environ.get("GOOGLE_MAPS_BROWSER_KEY") else "leaflet",
+            "browser_key": os.environ.get("GOOGLE_MAPS_BROWSER_KEY") or None,
+            "road_geometry": bool(os.environ.get("GOOGLE_MAPS_API_KEY")),
+        },
     }
 
 
@@ -299,6 +306,28 @@ def visit_detail(pid: str, vid: str) -> dict:
         raise HTTPException(404, "unknown visit")
     parent = s.plans.get(p.parent_plan_id) if p.parent_plan_id else None
     return explain_visit(w, p, vid, parent)
+
+
+@app.get("/api/plans/{pid}/routes/{eid}/geometry")
+def route_geometry(pid: str, eid: str) -> dict:
+    """Road paths of one employee's route for display (straight lines without a key)."""
+    from .travel.road_geometry import road_legs
+
+    s, p = _plan(pid)
+    w = WORLD_SNAPSHOTS.get(pid, s.world)
+    r = p.routes.get(eid)
+    if r is None:
+        raise HTTPException(404, "unknown employee")
+    locs = w.scenario.locations
+    emp = w.scenario.employees[eid]
+    seq = [r.start_location_id or emp.start_location_id]
+    for st in sorted(r.stops, key=lambda x: x.start):
+        if st.kind == "unavailable":
+            continue  # unpaid gap: no driving into it
+        seq.append(st.location_id)
+    seq.append(r.end_location_id or emp.end_location_id)
+    pts = [(locs[x].lat, locs[x].lon) for x in seq]
+    return {"employee_id": eid, "points": pts, **road_legs(pts)}
 
 
 @app.get("/api/plans/{pid}/diff/{other}")

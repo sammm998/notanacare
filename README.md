@@ -39,6 +39,7 @@ Optional environment (see `.env.example`, never commit keys):
 | Variable | Effect |
 |---|---|
 | `GOOGLE_MAPS_API_KEY` | Google **Routes API** `computeRouteMatrix` travel times (traffic-aware, cached to disk). Without it: synthetic travel. |
+| `GOOGLE_MAPS_BROWSER_KEY` | Google Maps as the map background. A **separate** key, restricted to *Maps JavaScript API* and to your site URL (HTTP referrer), because it is visible in the browser. Without it: OpenStreetMap. |
 | `ANTHROPIC_API_KEY` | Claude planning advisor for strategy C (`claude-opus-5-5`, override with `NOTANA_CLAUDE_MODEL`). Without it: deterministic advisor. |
 
 ### Deploy

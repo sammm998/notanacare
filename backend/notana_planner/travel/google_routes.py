@@ -17,6 +17,7 @@ import hashlib
 import json
 import logging
 import os
+import time
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -31,6 +32,10 @@ ROUTE_MATRIX_URL = "https://routes.googleapis.com/distanceMatrix/v2:computeRoute
 BLOCK = 25
 
 
+class _FatalRouteError(RuntimeError):
+    """Key / permission / request errors: retrying will not help."""
+
+
 class GoogleRoutesTravelTimeProvider(TravelTimeProvider):
     name = "google-routes"
 
@@ -40,7 +45,9 @@ class GoogleRoutesTravelTimeProvider(TravelTimeProvider):
         cache_dir: str | Path | None = None,
         fallback: TravelTimeProvider | None = None,
         timeout_s: float = 20.0,
-        max_requests: int = 400,
+        max_requests: int = 600,
+        max_retries: int = 5,
+        pace_s: float = 0.25,
     ) -> None:
         self.api_key = api_key or os.environ.get("GOOGLE_MAPS_API_KEY")
         if not self.api_key:
@@ -50,6 +57,8 @@ class GoogleRoutesTravelTimeProvider(TravelTimeProvider):
         self.fallback = fallback or SyntheticTravelTimeProvider()
         self.timeout_s = timeout_s
         self.max_requests = max_requests
+        self.max_retries = max_retries
+        self.pace_s = pace_s
 
     # -- caching -------------------------------------------------------------
     def _cache_key(self, locations: list[Location], departure_minute: int) -> str:
@@ -75,56 +84,83 @@ class GoogleRoutesTravelTimeProvider(TravelTimeProvider):
         minutes = [row[:] for row in synthetic.minutes]
         km = [row[:] for row in synthetic.km]
         filled = 0
-        failed = 0
+        failed_blocks = 0
+        ok_blocks = 0
         requests = 0
+        errors: dict[str, int] = {}
+        fatal: str | None = None
         departure = self._departure_time(departure_minute)
         for oi in range(0, n, BLOCK):
             for di in range(0, n, BLOCK):
-                if requests >= self.max_requests:
-                    failed += 1
+                if fatal or requests >= self.max_requests:
+                    failed_blocks += 1
                     continue
-                requests += 1
                 origins = locations[oi : oi + BLOCK]
                 dests = locations[di : di + BLOCK]
                 try:
-                    for el in self._request(origins, dests, departure):
-                        o = oi + el.get("originIndex", 0)
-                        d = di + el.get("destinationIndex", 0)
-                        if o == d or el.get("condition") != "ROUTE_EXISTS":
-                            continue
-                        dur = el.get("duration")
-                        if not dur:
-                            continue
-                        # Add the same parking / door overhead the synthetic model uses.
-                        minutes[o][d] = float(dur.rstrip("s")) / 60.0 + self.fallback.config.per_trip_overhead_min  # type: ignore[attr-defined]
-                        km[o][d] = el.get("distanceMeters", 0) / 1000.0
-                        filled += 1
-                except Exception as exc:  # noqa: BLE001 - any failure -> fallback
-                    failed += 1
-                    log.warning("Route matrix block failed (%s); using synthetic fallback", exc)
+                    elements, tries = self._request_with_retry(origins, dests, departure)
+                    requests += tries
+                except _FatalRouteError as exc:
+                    fatal = str(exc)
+                    failed_blocks += 1
+                    log.error("Routes API rejected the request: %s", exc)
+                    continue
+                except Exception as exc:  # noqa: BLE001 - give up on this block only
+                    failed_blocks += 1
+                    key = type(exc).__name__ + (f" {getattr(exc, 'code', '')}" if hasattr(exc, "code") else "")
+                    errors[key] = errors.get(key, 0) + 1
+                    log.warning("Route matrix block failed after retries (%s); synthetic fallback", exc)
+                    continue
+                ok_blocks += 1
+                for el in elements:
+                    o = oi + el.get("originIndex", 0)
+                    d = di + el.get("destinationIndex", 0)
+                    if o == d or el.get("condition") != "ROUTE_EXISTS" or not el.get("duration"):
+                        continue
+                    # Add the same parking / door overhead the synthetic model uses.
+                    minutes[o][d] = float(el["duration"].rstrip("s")) / 60.0 + self.fallback.config.per_trip_overhead_min  # type: ignore[attr-defined]
+                    km[o][d] = el.get("distanceMeters", 0) / 1000.0
+                    filled += 1
+                time.sleep(self.pace_s)
 
         total = n * (n - 1)
-        if filled == 0:
+        if ok_blocks == 0:
             source = "synthetic (google-routes unavailable)"
-        elif filled < total:
+        elif failed_blocks:
             source = "google-routes+synthetic-fallback"
         else:
             source = "google-routes"
-        result = BaseMatrix(
-            location_ids=[loc.id for loc in locations],
-            minutes=minutes,
-            km=km,
-            source=source,
-            notes=[
-                f"{filled}/{total} elements from Routes API in {requests} requests; "
-                f"{failed} failed blocks fell back to synthetic"
-            ],
-        )
-        if filled > 0:
-            path.write_text(
-                json.dumps({"minutes": minutes, "km": km, "source": source, "notes": result.notes})
-            )
+        notes = [f"{filled}/{total} elements from Routes API; {ok_blocks} blocks ok, {failed_blocks} failed ({requests} HTTP requests)"]
+        if errors:
+            notes.append("errors: " + ", ".join(f"{k} x{v}" for k, v in errors.items()))
+        if fatal:
+            notes.append(f"Routes API rejected the key/request: {fatal}")
+        result = BaseMatrix(location_ids=[loc.id for loc in locations], minutes=minutes, km=km, source=source, notes=notes)
+        if source == "google-routes":  # only complete matrices are cached
+            path.write_text(json.dumps({"minutes": minutes, "km": km, "source": source, "notes": notes}))
         return result
+
+    def _request_with_retry(self, origins: list[Location], dests: list[Location], departure: str) -> tuple[list[dict], int]:
+        """Retry rate limits / transient errors with exponential backoff (honours Retry-After)."""
+        delay = 2.0
+        for attempt in range(1, self.max_retries + 2):
+            try:
+                return self._request(origins, dests, departure), attempt
+            except urllib.error.HTTPError as exc:
+                body = exc.read().decode(errors="replace")[:300]
+                if exc.code in (400, 401, 403, 404):
+                    raise _FatalRouteError(f"HTTP {exc.code}: {body}") from exc
+                if attempt > self.max_retries or exc.code not in (429, 500, 502, 503, 504):
+                    raise
+                retry_after = exc.headers.get("Retry-After") if exc.headers else None
+                wait = float(retry_after) if retry_after and retry_after.isdigit() else delay
+            except (urllib.error.URLError, TimeoutError):
+                if attempt > self.max_retries:
+                    raise
+                wait = delay
+            time.sleep(min(wait, 60.0))
+            delay *= 2
+        raise RuntimeError("unreachable")
 
     @staticmethod
     def _departure_time(departure_minute: int) -> str:
@@ -165,5 +201,5 @@ class GoogleRoutesTravelTimeProvider(TravelTimeProvider):
         with urllib.request.urlopen(req, timeout=self.timeout_s) as resp:  # noqa: S310 - fixed https URL
             data = json.loads(resp.read().decode())
         if isinstance(data, dict):  # error payload
-            raise RuntimeError(data.get("error", {}).get("message", str(data)))
+            raise _FatalRouteError(data.get("error", {}).get("message", str(data)))
         return data
