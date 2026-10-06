@@ -59,6 +59,21 @@ import threading as _threading  # noqa: E402
 _threading.Thread(target=lambda: selector(ML_STORE).train(evaluate_cv=True), daemon=True).start()
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
+# Which code is running: Railway sets RAILWAY_GIT_COMMIT_SHA for every deployment.
+VERSION = (os.environ.get("RAILWAY_GIT_COMMIT_SHA") or os.environ.get("GIT_COMMIT") or "dev")[:7]
+FEATURES = ["week", "wishes", "atl", "lns", "suggestions", "live", "alarm", "vab", "ml", "documentation"]
+
+
+@app.middleware("http")
+async def no_stale_frontend(request, call_next):  # noqa: ANN001, ANN201
+    """The page, scripts and styles are always revalidated, so a new deployment is
+    visible on the next load instead of after the browser's heuristic cache expires."""
+    response = await call_next(request)
+    path = request.url.path
+    if path in ("/", "/documentation") or path.startswith("/static/"):
+        response.headers["Cache-Control"] = "no-cache"
+    return response
+
 
 # --------------------------------------------------------------------------- jobs
 def submit(kind: str, fn, *args) -> dict:
@@ -241,6 +256,8 @@ def health() -> dict:
         "llm_model": os.environ.get("NOTANA_CLAUDE_MODEL", "claude-opus-5-5"),
         "classifier": "mock-linear (no JEV SDK available)",
         "sessions": len(STORE.sessions),
+        "version": VERSION,
+        "features": FEATURES,
     }
 
 

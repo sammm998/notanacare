@@ -23,6 +23,7 @@ async function boot() {
   $("#weights").innerHTML = Object.entries(state.meta.weights).map(([k, v]) =>
     `<label>${esc(k.replaceAll("_", " "))}<input name="w_${k}" type="number" step="any" value="${v}" /></label>`).join("");
   const h = state.health;
+  setBadge("#b-version", `version ${h.version || "?"}`, "muted");
   setBadge("#b-llm", h.llm_configured ? `advisor: Claude (${h.llm_model})` : "advisor: deterministic (no API key)", h.llm_configured ? "ok" : "muted");
   setBadge("#b-travel", `travel: ${h.travel_provider}${h.google_maps_configured ? "" : " (no Google key)"}`, "muted");
   $$("#f-scenario input[type=range]").forEach((r) => {
