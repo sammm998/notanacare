@@ -9,6 +9,8 @@ const KPIS = [
   ["avg_travel_per_visit", "Travel / visit", 1, 1],
   ["preferred_time_deviation_avg", "Pref. deviation avg (min)", 1, 1],
   ["continuity_known_share", "Continuity (known staff)", "pct", -1],
+  ["gender_wish_met_share", "Gender wish met", "pct", -1],
+  ["language_wish_met_share", "Language wish met", "pct", -1],
   ["overtime_minutes", "Overtime (min)", 0, 1],
   ["workload_std_minutes", "Workload std (min)", 0, 1],
   ["utilization", "Utilisation", "pct", 0],
@@ -142,6 +144,7 @@ export function renderVisit(el, d, state, actions) {
       <dt>Staff</dt><dd>${v.required_employee_count}${v.required_employee_count === 2 ? " (synchronised start)" : ""}</dd>
       <dt>Skills (all staff)</dt><dd>${v.required_skills.map((x) => `<span class="pill">${esc(x)}</span>`).join("") || "–"}</dd>
       <dt>Delegations (lead)</dt><dd>${v.required_delegations.map((x) => `<span class="pill">${esc(x)}</span>`).join("") || "–"}</dd>
+      <dt>Wishes</dt><dd>${wishText(d.recipient) || "–"}</dd>
       <dt>Continuity</dt><dd>knows: ${esc(d.recipient.known_employees.join(", "))}${d.recipient.preferred_employees.length ? `<br>preferred: ${esc(d.recipient.preferred_employees.join(", "))}` : ""}${d.recipient.avoid_employees.length ? `<br>must avoid: ${esc(d.recipient.avoid_employees.join(", "))}` : ""}</dd>
     </dl>
     ${a ? `<h4>Assignment · ${esc(a.start_text)} (${a.preferred_deviation >= 0 ? "+" : ""}${a.preferred_deviation} min vs preferred) · continuity ${a.continuity_score}</h4>
@@ -201,4 +204,50 @@ export function renderExperiment(el, r) {
     <table><thead><tr><th>Strategy</th><th>Incident</th><th>Phase used</th><th class="num">s</th><th class="num">Changed</th><th class="num">Newly unplanned</th><th>Valid</th><th>Advisor</th></tr></thead><tbody>
     ${ran.map((x) => x.steps.map((s) => `<tr><td>${esc(x.label)}</td><td>${esc(s.incident.kind)} @${hhmm(s.incident.clock)}</td><td>${esc(s.phase_used)}</td><td class="num">${s.seconds}</td><td class="num">${s.visits_changed}</td><td class="num">${s.newly_unplanned}</td><td>${s.valid ? "✅" : "❌"}</td><td>${esc(s.advisor?.source || "")}</td></tr>`).join("")).join("")}
     </tbody></table>`;
+}
+
+
+const LANG = { sv: "Swedish", fi: "Finnish", ar: "Arabic", fa: "Persian", so: "Somali", bcs: "Bosnian/Croatian/Serbian", es: "Spanish", pl: "Polish", en: "English" };
+
+function wishText(r) {
+  const out = [];
+  if (r.gender_preference) {
+    out.push(`${r.gender_strict ? "<b>requires</b>" : "wishes"} ${r.gender_preference === "F" ? "female" : "male"} staff ${r.gender_scope === "all" ? "for all visits" : "for intimate care"}`);
+  }
+  if (r.languages?.length) out.push(`${r.language_required ? "<b>needs</b>" : "prefers"} ${r.languages.map((l) => esc(LANG[l] || l)).join("/")}-speaking staff${r.language_required ? " (lead)" : ""}`);
+  if (r.pets?.length) out.push(`${r.pets.map(esc).join(" + ")} in the home (no allergic staff)`);
+  if (r.smokes) out.push("smoking home (no staff with smoke-free requirement)");
+  return out.join("<br>");
+}
+
+export function renderWeek(el, w, onDay) {
+  if (!w) {
+    el.innerHTML = '<div class="empty">Generate a week scenario (Horizon: a week) to plan Monday to Sunday.</div>';
+    return;
+  }
+  const t = w.totals;
+  const v = w.validation;
+  const rules = w.rules;
+  const byCode = {};
+  for (const e of v.errors) (byCode[e.code] ||= []).push(e);
+  el.innerHTML = `
+    <div class="kpis" style="margin-bottom:12px">
+      <div class="kpi"><div class="v">${fmtNum(t.interventions)}</div><div class="l">Interventions this week</div></div>
+      <div class="kpi"><div class="v">${fmtNum(t.visits)}</div><div class="l">Visits</div></div>
+      <div class="kpi"><div class="v">${t.planned ?? "–"}</div><div class="l">Planned (${t.days_planned}/7 days)</div></div>
+      <div class="kpi"><div class="v">${t.unplanned ?? "–"}</div><div class="l">Unplanned</div></div>
+      <div class="kpi"><div class="v">${t.headcount}</div><div class="l">Employees (head count)</div></div>
+      <div class="kpi ${t.days_planned === 7 ? (v.valid ? "ok" : "bad") : ""}"><div class="v">${t.days_planned === 7 ? (v.valid ? "✓" : v.errors.length) : "–"}</div><div class="l">Week rules (${v.checks} checks)</div></div>
+    </div>
+    <p class="hint">Rules checked across days from the plans themselves: ${rules.min_daily_rest_h} h dygnsvila between work days (ATL 13 §), ${rules.min_weekly_rest_h} h veckovila per 7 days (ATL 14 §), weekly hours ≤ contract + ${rules.max_weekly_overtime_h} h overtime. Within each day the day validator checks max ${rules.max_continuous_work_h} h work without a rest (ATL 15 §) and max ${rules.max_daily_work_h} h work.</p>
+    ${v.errors.length ? `<h4>Week rule violations</h4>${Object.entries(byCode).map(([c, es]) => `<p><span class="code">${esc(c)}</span> ${es.length} × · ${esc(es[0].message)}</p>`).join("")}` : ""}
+    <h4>Days</h4>
+    <table><thead><tr><th>Day</th><th class="num">Interventions</th><th class="num">Visits</th><th class="num">On duty</th><th class="num">Planned</th><th class="num">Unplanned</th><th class="num">Travel (min)</th><th class="num">Known staff</th><th>Validator</th></tr></thead><tbody>
+      ${w.days.map((d) => `<tr class="clickable" data-sid="${esc(d.scenario_id)}"><td><a href="#" data-sid="${esc(d.scenario_id)}">${esc(d.weekday)}</a></td><td class="num">${fmtNum(d.interventions)}</td><td class="num">${d.visits}</td><td class="num">${d.employees_on_duty}</td><td class="num">${d.planned ?? "–"}</td><td class="num">${d.unplanned ?? "–"}</td><td class="num">${d.travel_minutes != null ? fmtNum(d.travel_minutes) : "–"}</td><td class="num">${d.continuity_known_share != null ? pct(d.continuity_known_share) : "–"}</td><td>${d.valid == null ? "not planned" : d.valid ? '<span class="badge ok">VALID</span>' : '<span class="badge bad">INVALID</span>'}</td></tr>`).join("")}
+    </tbody></table>
+    <h4>Hours per employee</h4>
+    <div style="overflow-x:auto"><table class="hours"><thead><tr><th>Employee</th><th>Team</th><th>Shift</th>${w.days.map((d) => `<th class="num">${esc(d.weekday)}</th>`).join("")}<th class="num">Week</th><th class="num">Contract</th></tr></thead><tbody>
+      ${w.employees.map((e) => `<tr><td>${esc(e.employee_id)} · ${esc(e.name)}</td><td>${esc(e.team)}</td><td>${esc(e.shift)}</td>${e.hours.map((h, i) => `<td class="num ${h === null && e.days_off.includes(w.days[i].weekday) ? "off" : ""}">${h === null ? (e.days_off.includes(w.days[i].weekday) ? "off" : "–") : h.toFixed(1)}</td>`).join("")}<td class="num ${e.worked_hours > e.contract_hours + rules.max_weekly_overtime_h ? "over" : ""}">${e.worked_hours.toFixed(1)}</td><td class="num">${e.contract_hours.toFixed(1)}</td></tr>`).join("")}
+    </tbody></table></div>`;
+  el.querySelectorAll("a[data-sid]").forEach((a) => a.addEventListener("click", (ev) => { ev.preventDefault(); onDay(a.dataset.sid); }));
 }

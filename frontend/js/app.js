@@ -1,12 +1,13 @@
 import { api, runJob } from "./api.js";
 import { changedVisits, renderGantt } from "./gantt.js";
 import { initMap, invalidate, renderItinerary, renderMap, renderTeamLegend } from "./map.js";
-import { renderConflicts, renderExperiment, renderHistory, renderKpis, renderReplan, renderScore, renderVisit } from "./panels.js";
+import { renderConflicts, renderExperiment, renderHistory, renderKpis, renderReplan, renderScore, renderVisit, renderWeek } from "./panels.js";
 import { $, $$, esc, hhmm, parseHHMM, toast } from "./util.js";
 
 const state = {
   meta: null, health: null, scenario: null, plan: null, parent: null, lastIncident: null,
   visitsById: {}, empsById: {}, tab: "map", selectedEmp: "", selectedVisit: null, mapMode: "employee",
+  week: null, // week summary (week scenarios only)
 };
 
 // ------------------------------------------------------------------ boot
@@ -54,13 +55,82 @@ function indexScenario(sc) {
   state.scenario = sc;
   state.visitsById = Object.fromEntries(sc.visits.map((v) => [v.id, v]));
   state.empsById = Object.fromEntries(sc.employees.map((e) => [e.id, e]));
-  setBadge("#b-scenario", `${sc.area} · ${sc.counts.interventions} interventions → ${sc.counts.visits} visits · ${sc.counts.recipients} recipients · ${sc.counts.employees} employees`, "muted");
+  setBadge("#b-scenario", `${sc.week ? `${sc.weekday} · ` : ""}${sc.area} · ${sc.counts.interventions} interventions → ${sc.counts.visits} visits · ${sc.counts.recipients} recipients · ${sc.counts.employees} employees`, "muted");
   setBadge("#b-travel", `travel: ${sc.travel.source}${sc.travel.traffic.global_multiplier !== 1 || Object.keys(sc.travel.traffic.zone_multipliers).length ? " + traffic" : ""}`, sc.travel.source.startsWith("google") ? "ok" : "muted");
   $("#b-travel").title = (sc.travel.notes || []).join("\n") || "Active travel-time source";
   $("#sel-emp").innerHTML = sc.employees.map((e) => `<option value="${e.id}">${esc(e.id)} · ${esc(e.name)} · ${esc(e.team)}</option>`).join("");
   $("#sel-map-team").innerHTML = sc.zones.map((z) => `<option>${esc(z)}</option>`).join("");
   $("#sel-team").innerHTML = '<option value="">all teams</option>' + sc.zones.map((z) => `<option>${esc(z)}</option>`).join("");
   $("#f-plan button").disabled = false;
+  renderWeekBar();
+}
+
+// ------------------------------------------------------------------ week
+function renderWeekBar() {
+  const wk = state.scenario?.week;
+  $("#week-bar").classList.toggle("hidden", !wk);
+  $("#tab-btn-week").classList.toggle("hidden", !wk);
+  if (!wk) {
+    state.week = null;
+    if (state.tab === "week") switchTab("map");
+    return;
+  }
+  $("#btn-plan-week").disabled = false;
+  const valid = Object.fromEntries((state.week?.days || []).map((d) => [d.scenario_id, d.valid]));
+  $("#week-days").innerHTML = wk.days.map((d) => {
+    const v = valid[d.scenario_id];
+    const dot = d.current_plan_id ? `<i class="dot ${v === false ? "bad" : "ok"}"></i>` : '<i class="dot"></i>';
+    return `<button data-sid="${esc(d.scenario_id)}" class="${d.scenario_id === state.scenario.id ? "active" : ""}" title="${d.current_plan_id ? "planned" : "not planned yet"}">${esc(d.weekday)}${dot}</button>`;
+  }).join("");
+  $$("#week-days button").forEach((b) => b.addEventListener("click", () => selectDay(b.dataset.sid)));
+}
+
+async function loadWeek() {
+  const wk = state.scenario?.week;
+  state.week = wk ? await api("GET", `/api/weeks/${wk.id}`) : null;
+}
+
+async function selectDay(sid) {
+  try {
+    indexScenario(await api("GET", `/api/scenarios/${sid}`));
+    state.lastIncident = null;
+    if (state.scenario.current_plan_id) {
+      await loadPlan(state.scenario.current_plan_id);
+    } else {
+      state.plan = state.parent = null;
+      setBadge("#b-valid", "not validated", "muted");
+      $("#f-incident button").disabled = true;
+      $("#kpis").innerHTML = `<div class="empty">${esc(state.scenario.weekday)}: ${state.scenario.counts.visits} visits from ${state.scenario.counts.interventions} interventions, ${state.scenario.counts.employees} employees on duty. Optimise this day or the whole week.</div>`;
+    }
+    render();
+  } catch (err) {
+    toast(err.message);
+  }
+}
+
+function planBody() {
+  const f = $("#f-plan");
+  const weights = {};
+  $$("#weights input").forEach((i) => (weights[i.name.slice(2)] = Number(i.value)));
+  return { strategy: f.strategy.value, time_limit_s: Number(f.time_limit_s.value), weights, max_overtime_min: Number(f.max_overtime_min.value) };
+}
+
+async function planWeek() {
+  const wk = state.scenario?.week;
+  if (!wk) return;
+  const btn = $("#btn-plan-week");
+  btn.disabled = true;
+  try {
+    const res = await runJob(api("POST", `/api/weeks/${wk.id}/plan`, planBody()), "Optimising week");
+    await loadWeek();
+    await selectDay(state.scenario.id);
+    switchTab("week");
+    toast(`Week optimised: ${state.week.totals.planned} of ${state.week.totals.visits} visits planned · days ${res.valid ? "VALID" : "with violations"} · week rules ${state.week.validation.valid ? "OK" : "VIOLATED"}`, 8000);
+  } catch (err) {
+    toast(err.message, 8000);
+  } finally {
+    btn.disabled = false;
+  }
 }
 
 async function loadPlan(pid) {
@@ -100,6 +170,10 @@ function render() {
   if (t === "conflicts") renderConflicts($("#conflicts"), state, openVisit);
   if (t === "replan") renderReplan($("#replan"), state, openVisit);
   if (t === "score") renderScore($("#score"), state.plan);
+  if (t === "week") {
+    renderWeek($("#week"), state.week, selectDay);
+    if (state.scenario?.week) loadWeek().then(() => { if (state.tab === "week") renderWeek($("#week"), state.week, selectDay); renderWeekBar(); }).catch((e) => toast(e.message));
+  }
 }
 
 function employeesWithRoutes() {
@@ -289,6 +363,7 @@ function wire() {
     const body = {};
     for (const [k, v] of fd.entries()) body[k] = ["area", "travel_provider"].includes(k) ? v : Number(v);
     body.breaks_enabled = e.target.breaks_enabled.checked;
+    body.preferences_enabled = e.target.preferences_enabled.checked;
     const btn = e.target.querySelector("button");
     btn.disabled = true;
     try {
@@ -296,7 +371,8 @@ function wire() {
       state.plan = state.parent = state.lastIncident = null;
       setBadge("#b-valid", "not validated", "muted");
       $("#f-incident button").disabled = true;
-      $("#kpis").innerHTML = `<div class="empty">Scenario ready: ${state.scenario.counts.visits} visits built from ${state.scenario.counts.interventions} interventions (${state.scenario.counts.double_staffed} double-staffed, ${state.scenario.counts.hard_windows} hard windows, ${state.scenario.counts.with_requirements} with skill/delegation requirements; ${Math.round(state.scenario.counts.care_minutes / 60)} care hours). Now optimise the day.</div>`;
+      state.week = null;
+      $("#kpis").innerHTML = `<div class="empty">${state.scenario.week ? "Week ready (Mon–Sun). Monday: " : "Scenario ready: "} ${state.scenario.counts.visits} visits built from ${state.scenario.counts.interventions} interventions (${state.scenario.counts.double_staffed} double-staffed, ${state.scenario.counts.hard_windows} hard windows, ${state.scenario.counts.with_requirements} with skill/delegation requirements; ${Math.round(state.scenario.counts.care_minutes / 60)} care hours). ${state.scenario.week ? "Optimise one day, or the whole week with the button above." : "Now optimise the day."}</div>`;
       render();
     } catch (err) {
       toast(err.message);
@@ -305,17 +381,14 @@ function wire() {
     }
   });
 
+  $("#btn-plan-week").addEventListener("click", planWeek);
   $("#f-plan").addEventListener("submit", async (e) => {
     e.preventDefault();
     const f = e.target;
-    const weights = {};
-    $$("#weights input").forEach((i) => (weights[i.name.slice(2)] = Number(i.value)));
     const btn = f.querySelector("button");
     btn.disabled = true;
     try {
-      const res = await runJob(api("POST", `/api/scenarios/${state.scenario.id}/plan`, {
-        strategy: f.strategy.value, time_limit_s: Number(f.time_limit_s.value), weights, max_overtime_min: Number(f.max_overtime_min.value),
-      }), "Optimising");
+      const res = await runJob(api("POST", `/api/scenarios/${state.scenario.id}/plan`, planBody()), "Optimising");
       await refreshScenario();
       await loadPlan(res.plan_id);
       state.lastIncident = null;

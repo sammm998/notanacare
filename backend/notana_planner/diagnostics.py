@@ -33,6 +33,11 @@ class Gap:
 
 
 def _qualifies(scenario: Scenario, eid: str, visit: Visit, role: int) -> list[str]:
+    return _base_missing(scenario, eid, visit, role) + _wish_blocks(scenario, eid, visit, role)
+
+
+def _base_missing(scenario: Scenario, eid: str, visit: Visit, role: int) -> list[str]:
+    """Skills, delegations and the recipient's avoid-list."""
     e = scenario.employees[eid]
     r = scenario.recipients[visit.recipient_id]
     miss = [f"skill {s}" for s in visit.required_skills if s not in e.skills]
@@ -40,6 +45,23 @@ def _qualifies(scenario: Scenario, eid: str, visit: Visit, role: int) -> list[st
         miss += [f"delegation {d}" for d in visit.required_delegations if d not in e.delegations]
     if eid in r.avoid_employee_ids:
         miss.append("avoided by recipient")
+    return miss
+
+
+def _wish_blocks(scenario: Scenario, eid: str, visit: Visit, role: int) -> list[str]:
+    """Hard wishes / work-environment rules that exclude this employee."""
+    e = scenario.employees[eid]
+    r = scenario.recipients[visit.recipient_id]
+    miss: list[str] = []
+    if r.gender_strict and r.gender_preference and (r.gender_scope == "all" or visit.intimate_care):
+        if e.gender != r.gender_preference:
+            miss.append("female staff required" if r.gender_preference == "F" else "male staff required")
+    if set(r.pets) & set(e.pet_allergies):
+        miss.append("pet allergy")
+    if r.smokes and e.avoid_smoking:
+        miss.append("smoke-free workplace")
+    if role == 0 and r.language_required and not set(r.languages) & set(e.languages):
+        miss.append(f"language {'/'.join(r.languages)}")
     return miss
 
 
@@ -94,6 +116,15 @@ def _diagnose(scenario: Scenario, travel: TravelMatrix, plan: Plan, v: Visit) ->
 
     roles = range(v.required_employee_count)
     qualified = {r: [e for e in scenario.employees if not _qualifies(scenario, e, v, r)] for r in roles}
+    if not qualified[0] and any(not _base_missing(scenario, e, v, 0) for e in scenario.employees):
+        blocks = sorted({m for e in scenario.employees for m in _wish_blocks(scenario, e, v, 0)})
+        return [
+            UnplannedReason(
+                "WISHES_EXCLUDE_ALL_STAFF",
+                f"Employees with the required qualifications exist, but all are excluded by: {', '.join(blocks)}.",
+                {"blocking": blocks},
+            )
+        ]
     if not qualified[0]:
         missing = sorted({m for e in scenario.employees for m in _qualifies(scenario, e, v, 0)})
         needs = v.required_delegations + v.required_skills
@@ -119,6 +150,17 @@ def _diagnose(scenario: Scenario, travel: TravelMatrix, plan: Plan, v: Visit) ->
 
     working = {r: [e for e in qualified[r] if on_shift(e)] for r in roles}
     if not working[0]:
+        base_on_shift = [e for e in scenario.employees if not _base_missing(scenario, e, v, 0) and on_shift(e)]
+        if base_on_shift:
+            blocks = sorted({m for e in base_on_shift for m in _wish_blocks(scenario, e, v, 0)})
+            return [
+                UnplannedReason(
+                    "WISHES_EXCLUDE_ALL_STAFF",
+                    f"{len(base_on_shift)} qualified employee(s) are on shift during {window}, "
+                    f"but all are excluded by: {', '.join(blocks)}.",
+                    {"on_shift": base_on_shift, "blocking": blocks},
+                )
+            ]
         sick = [e for e in qualified[0] if scenario.employees[e].status != EmployeeStatus.WORKING
                 or any(iv.reason.startswith("sick") for iv in scenario.employees[e].unavailable)]
         deleg = "/".join(v.required_delegations) or "the required skills"

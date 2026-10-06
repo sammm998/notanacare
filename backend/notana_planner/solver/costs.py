@@ -19,6 +19,15 @@ def assignment_penalty(problem: PlanningProblem, task: Task, employee_id: str) -
         pen += w.continuity_unknown_employee * cw
     if r.preferred_employee_ids and employee_id not in r.preferred_employee_ids:
         pen += w.continuity_preferred_bonus * cw
+    # Wishes (strict variants are hard and handled by allowed vehicles)
+    emp = problem.scenario.employees[employee_id]
+    if r.gender_preference and not r.gender_strict and emp.gender != r.gender_preference:
+        if r.gender_scope == "all" or problem.scenario.visits[task.visit_id].intimate_care:
+            pen += w.gender_wish_mismatch
+    if r.languages and not set(r.languages) & set(emp.languages):
+        pen += w.language_wish_mismatch
+    if emp.preferred_zones and r.zone not in emp.preferred_zones:
+        pen += w.outside_preferred_zone
     if task.previous_employees and employee_id not in task.previous_employees:
         pen += w.employee_change
         if any(e in problem.unaffected_employees for e in task.previous_employees):

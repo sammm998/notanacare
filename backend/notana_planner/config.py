@@ -24,6 +24,10 @@ class ObjectiveWeights:
     workload_overload_minute: int = 4  # minute of care above fair share
     overtime_minute: int = 400
     idle_minute: int = 1  # route span (start..end), compresses idle gaps
+    # Wishes (the strict variants are hard constraints, never weighted)
+    gender_wish_mismatch: int = 500  # per staff member of the non-wished gender
+    language_wish_mismatch: int = 250  # per staff member without the recipient's language
+    outside_preferred_zone: int = 40  # per visit outside the employee's preferred area
     # Re-planning stability
     employee_change: int = 900  # per visit-slot moved to another employee
     time_change_minute: int = 12  # per minute away from previously communicated start

@@ -15,8 +15,18 @@ DELEGATIONS = (MEDICATION, INSULIN, WOUND_CARE, CATHETER)
 HOIST = "HOIST"  # lift / patient-hoist trained
 DEMENTIA = "DEMENTIA"
 PALLIATIVE = "PALLIATIVE"
-FINNISH = "FINNISH"  # Finnish-speaking staff (minority language right)
-SKILLS = (HOIST, DEMENTIA, PALLIATIVE, FINNISH)
+SKILLS = (HOIST, DEMENTIA, PALLIATIVE)
+
+# Language is a person attribute, not a skill (Finnish: minority-language right).
+LANGUAGES = {
+    "sv": "Swedish", "fi": "Finnish", "ar": "Arabic", "fa": "Persian", "so": "Somali",
+    "bcs": "Bosnian/Croatian/Serbian", "es": "Spanish", "pl": "Polish", "en": "English",
+}
+
+# Interventions that make a visit "intimate care" (gender wishes usually apply here).
+INTIMATE_TYPES = frozenset({
+    "hygiene", "shower", "toileting", "dressing", "undressing", "catheter", "bedtime", "oral_care", "skin_care",
+})
 
 # Share of employees holding each qualification (before team-level noise).
 EMPLOYEE_QUALIFICATION_RATES = {
@@ -27,7 +37,6 @@ EMPLOYEE_QUALIFICATION_RATES = {
     HOIST: 0.55,
     DEMENTIA: 0.45,
     PALLIATIVE: 0.15,
-    FINNISH: 0.08,
 }
 
 

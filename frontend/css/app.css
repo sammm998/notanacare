@@ -81,6 +81,13 @@ button:disabled { opacity: .5; cursor: not-allowed; }
 .map-wrap { display: grid; grid-template-columns: 1fr 340px; gap: 10px; }
 @media (max-width: 1100px) { .map-wrap { grid-template-columns: 1fr; } .map-side { max-height: none; } }
 .map-side { border: 1px solid var(--line); border-radius: 8px; padding: 10px; overflow: auto; max-height: 70vh; font-size: 12px; }
+.weekbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 10px; }
+.weekbar .lbl { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
+.weekbar .seg button .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-left: 5px; background: var(--line); vertical-align: middle; }
+.weekbar .seg button .dot.ok { background: var(--ok); }
+.weekbar .seg button .dot.bad { background: var(--bad); }
+.hours td.off { color: var(--muted); }
+.hours td.over { color: var(--bad); font-weight: 600; }
 .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
 .seg button { border: none; border-radius: 0; padding: 5px 10px; }
 .seg button.active { background: var(--brand); color: var(--brand-ink); font-weight: 600; }

@@ -203,6 +203,14 @@ def explain_visit(world: "World", plan: Plan, visit_id: str, reference: Plan | N
             "known_employees": r.known_employee_ids,
             "preferred_employees": r.preferred_employee_ids,
             "avoid_employees": r.avoid_employee_ids,
+            "gender": r.gender,
+            "gender_preference": r.gender_preference,
+            "gender_strict": r.gender_strict,
+            "gender_scope": r.gender_scope,
+            "languages": r.languages,
+            "language_required": r.language_required,
+            "pets": r.pets,
+            "smokes": r.smokes,
             "continuity_weight": r.continuity_weight,
         },
         "interventions": [
@@ -253,6 +261,22 @@ def explain_visit(world: "World", plan: Plan, visit_id: str, reference: Plan | N
                 reasons.append("does not know the recipient (continuity cost accepted)")
             if e.team == r.zone:
                 reasons.append(f"belongs to team {e.team} (same area)")
+            if r.gender_preference and (r.gender_scope == "all" or v.intimate_care):
+                g = "female" if r.gender_preference == "F" else "male"
+                if e.gender == r.gender_preference:
+                    reasons.append(f"{g} staff as the recipient {'requires' if r.gender_strict else 'wishes'}")
+                else:
+                    reasons.append(f"recipient wishes {g} staff (wish not met, cost accepted)")
+            if r.languages:
+                shared = sorted(set(r.languages) & set(e.languages))
+                reasons.append(
+                    f"speaks {'/'.join(shared)} with the recipient" if shared
+                    else f"does not speak {'/'.join(r.languages)} (language wish not met)"
+                )
+            if r.pets:
+                reasons.append(f"not allergic to {'/'.join(r.pets)} in the home")
+            if e.travel_mode == "bike":
+                reasons.append("travels by bike (slower travel times used)")
             reasons.append(f"travel from previous stop {st.travel_from_prev} min")
             if reference and visit_id in reference.assignments and eid in reference.assignments[visit_id].employee_ids:
                 reasons.append("kept from the previous plan (stability)")
@@ -265,6 +289,13 @@ def explain_visit(world: "World", plan: Plan, visit_id: str, reference: Plan | N
                 and all(s in x.skills for s in v.required_skills)
                 and (role != 0 or all(d in x.delegations for d in v.required_delegations))
                 and x.id not in r.avoid_employee_ids
+                and not (set(r.pets) & set(x.pet_allergies))
+                and not (r.smokes and x.avoid_smoking)
+                and not (
+                    r.gender_strict and r.gender_preference and (r.gender_scope == "all" or v.intimate_care)
+                    and x.gender != r.gender_preference
+                )
+                and not (role == 0 and r.language_required and not set(r.languages) & set(x.languages))
             ]
             staff.append(
                 {

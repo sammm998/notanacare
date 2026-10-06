@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from ..config import ObjectiveWeights, SolverSettings
-from ..domain import BreakRule, Employee, EmployeeStatus, Scenario, Visit
+from ..domain import BreakRule, Employee, EmployeeStatus, Scenario, Visit, WorkingTimeRules
+from ..working_time import clamp_break, latest_end
 from ..travel import TravelMatrix
 from .problem import PlanningProblem, Task, VehicleSpec, fair_workloads, missing_for_role, task_penalty
 
@@ -15,6 +16,7 @@ def vehicle_for(
     location: str | None = None,
     taken_break_ids: set[int] | None = None,
     travel: TravelMatrix | None = None,
+    rules: WorkingTimeRules | None = None,
 ) -> VehicleSpec | None:
     """Vehicle spec for an employee, honouring sickness and unavailability."""
     if emp.status != EmployeeStatus.WORKING:
@@ -22,7 +24,7 @@ def vehicle_for(
     start = max(emp.shift_start, available_from if available_from is not None else emp.shift_start)
     if emp.available_from is not None:
         start = max(start, emp.available_from)
-    end = emp.shift_end + max(0, settings.max_overtime_min)
+    end = latest_end(emp, rules, settings.max_overtime_min)  # overtime capped by ATL
     breaks: list[BreakRule] = []
     for k, b in enumerate(emp.breaks):
         if taken_break_ids and k in taken_break_ids:
@@ -33,7 +35,7 @@ def vehicle_for(
             # Availability (delay, ongoing visit, re-plan clock) squeezed the window:
             # leave time to reach the office. The validator reports the shift.
             latest = max(latest, earliest + 45)
-        breaks.append(BreakRule(b.duration_minutes, earliest, latest, b.kind))
+        breaks.append(clamp_break(BreakRule(b.duration_minutes, earliest, latest, b.kind), emp, rules, end))
     for iv in sorted(emp.unavailable, key=lambda i: i.start):
         if iv.end <= start:
             continue
@@ -101,7 +103,7 @@ def build_global_problem(
 ) -> PlanningProblem:
     vehicles = []
     for emp in scenario.employees.values():
-        v = vehicle_for(emp, settings, travel=travel)
+        v = vehicle_for(emp, settings, travel=travel, rules=scenario.rules)
         if v is not None:
             vehicles.append(v)
     ids = visit_ids if visit_ids is not None else sorted(scenario.visits)

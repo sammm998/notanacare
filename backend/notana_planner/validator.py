@@ -11,7 +11,9 @@ Checked (hard):
   consecutive stops, departure / return travel), no overlap per employee,
   visit start windows, shift bounds (+ approved overtime), availability
   (sickness, delays, unavailable intervals), skills (all staff), delegations
-  (lead holds all), recipient avoid-list, double-staffing count, distinct
+  (lead holds all), recipient avoid-list, strict gender requirement,
+  pet allergy, smoke-free workplace, required language (lead),
+  Arbetstidslagen (max 5 h continuous work, max daily work, 11 h dygnsvila), double-staffing count, distinct
   employees and start synchronisation, mandatory breaks, recipient
   double-booking, locked / started / completed visits unchanged vs the
   reference plan, max workload.
@@ -277,6 +279,46 @@ def validate_plan(
                 elif route.route_end > emp.shift_end:
                     warn("OVERTIME", f"{eid}: {route.route_end - emp.shift_end} min approved overtime", employee_id=eid)
 
+        # Arbetstidslagen: continuous work, daily work, dygnsvila (re-derived from the route)
+        rules = scenario.rules
+        if rules.enabled and stops and route.route_start is not None:
+            day_end = route.route_end if route.route_end is not None else max(s.end for s in stops)
+            rests = [s for s in stops if s.kind in ("break", "unavailable") and s.end - s.start >= 30]
+            seg_start, worked = route.route_start, 0
+            for s in rests + [None]:
+                seg_end = s.start if s is not None else day_end
+                tick("working_time")
+                if seg_end - seg_start > rules.max_continuous_work_min and not (clock is not None and seg_end <= clock):
+                    err(
+                        "ATL_CONTINUOUS_WORK",
+                        f"{eid}: works {seg_end - seg_start} min in a row {_hhmm(seg_start)}-{_hhmm(seg_end)} "
+                        f"without a rest (max {rules.max_continuous_work_min}, ATL 15 §)",
+                        employee_id=eid,
+                    )
+                worked += max(0, seg_end - seg_start)
+                if s is not None:
+                    seg_start = max(seg_start, s.end)
+            if worked > rules.max_daily_work_min:
+                err(
+                    "MAX_DAILY_WORK",
+                    f"{eid}: {worked} min of work, max {rules.max_daily_work_min}",
+                    employee_id=eid,
+                )
+            if day_end - route.route_start > 24 * 60 - rules.min_daily_rest_min:
+                err(
+                    "DAILY_REST_VIOLATED",
+                    f"{eid}: day spans {_hhmm(route.route_start)}-{_hhmm(day_end)}, leaving less than "
+                    f"{rules.min_daily_rest_min // 60} h dygnsvila (ATL 13 §)",
+                    employee_id=eid,
+                )
+            if emp.latest_end_by_rest is not None and day_end > emp.latest_end_by_rest:
+                err(
+                    "DAILY_REST_VIOLATED",
+                    f"{eid}: ends {_hhmm(day_end)}, but tomorrow's shift needs the day to end by "
+                    f"{_hhmm(emp.latest_end_by_rest)} (11 h dygnsvila, ATL 13 §)",
+                    employee_id=eid,
+                )
+
         # Mandatory meal breaks
         if emp.status == EmployeeStatus.WORKING and stops:
             break_stops = [s for s in stops if s.kind == "break"]
@@ -361,6 +403,30 @@ def validate_plan(
                 err("MISSING_SKILL", f"{eid} lacks skill(s) {missing} for {vid}", visit_id=vid, employee_id=eid)
             if eid in r.avoid_employee_ids:
                 err("AVOIDED_EMPLOYEE", f"{r.id} must not be visited by {eid} ({vid})", visit_id=vid, employee_id=eid)
+            in_scope = r.gender_scope == "all" or v.intimate_care
+            if r.gender_strict and r.gender_preference and in_scope and emp.gender != r.gender_preference:
+                err(
+                    "GENDER_REQUIREMENT_VIOLATED",
+                    f"{r.id} requires {'female' if r.gender_preference == 'F' else 'male'} staff for "
+                    f"{'all visits' if r.gender_scope == 'all' else 'intimate care'}; {eid} on {vid} is not",
+                    visit_id=vid,
+                    employee_id=eid,
+                )
+            pets = sorted(set(r.pets) & set(emp.pet_allergies))
+            if pets:
+                err("PET_ALLERGY", f"{eid} is allergic to {', '.join(pets)} living at {r.id} ({vid})", visit_id=vid, employee_id=eid)
+            if r.smokes and emp.avoid_smoking:
+                err("SMOKING_EXPOSURE", f"{eid} must not work in a smoking home ({r.id}, {vid})", visit_id=vid, employee_id=eid)
+        tick("wishes")
+        if r.language_required and a.employee_ids:
+            lead = emps.get(a.employee_ids[0])
+            if lead is not None and not set(r.languages) & set(lead.languages):
+                err(
+                    "LANGUAGE_REQUIRED",
+                    f"{r.id} needs staff speaking {'/'.join(r.languages)}; lead {lead.id} on {vid} does not",
+                    visit_id=vid,
+                    employee_id=lead.id,
+                )
         if v.required_delegations and a.employee_ids:
             lead = emps.get(a.employee_ids[0])
             holders = [

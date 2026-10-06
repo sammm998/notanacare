@@ -77,6 +77,7 @@ class Session:
     current_plan_id: str | None = None
     history: list[dict[str, Any]] = field(default_factory=list)
     lock: threading.Lock = field(default_factory=threading.Lock)
+    week_id: str | None = None  # set when this day belongs to a week scenario
 
     @property
     def current(self) -> Plan | None:
@@ -84,7 +85,7 @@ class Session:
 
 
 class SessionStore:
-    def __init__(self, db: Database, max_sessions: int = 8) -> None:
+    def __init__(self, db: Database, max_sessions: int = 24) -> None:
         self.db = db
         self.sessions: dict[str, Session] = {}
         self.max_sessions = max_sessions
@@ -94,7 +95,10 @@ class SessionStore:
         with self._lock:
             self.sessions[session.id] = session
             while len(self.sessions) > self.max_sessions:
-                self.sessions.pop(next(iter(self.sessions)))
+                old = self.sessions.pop(next(iter(self.sessions)))
+                if old.week_id:  # a week is evicted as a whole
+                    for k in [k for k, v in self.sessions.items() if v.week_id == old.week_id and k != session.id]:
+                        self.sessions.pop(k)
 
     def get(self, sid: str) -> Session:
         s = self.sessions.get(sid)

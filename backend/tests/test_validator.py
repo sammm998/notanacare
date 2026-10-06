@@ -132,3 +132,53 @@ def test_detects_work_outside_shift(small_world, plan_copy):
     r.route_end = small_world.scenario.employees[eid].shift_end + 30
     c, _ = codes(small_world, plan_copy)
     assert "OUTSIDE_SHIFT" in c
+
+
+def _first_assignment(small_world, small_plan):
+    vid, a = next(iter(sorted(small_plan.assignments.items())))
+    sc = copy.deepcopy(small_world.scenario)
+    return sc, vid, a, sc.recipients[sc.visits[vid].recipient_id], sc.employees[a.employee_ids[0]]
+
+
+def test_detects_strict_gender_violation(small_world, small_plan):
+    sc, vid, a, r, e = _first_assignment(small_world, small_plan)
+    r.gender_preference, r.gender_strict, r.gender_scope = ("M" if e.gender == "F" else "F"), True, "all"
+    c, _ = codes(small_world, small_plan, scenario=sc)
+    assert "GENDER_REQUIREMENT_VIOLATED" in c
+    r.gender_strict = False  # a wish is soft: never a hard violation
+    c, _ = codes(small_world, small_plan, scenario=sc)
+    assert "GENDER_REQUIREMENT_VIOLATED" not in c
+
+
+def test_detects_pet_allergy_smoking_and_language(small_world, small_plan):
+    sc, vid, a, r, e = _first_assignment(small_world, small_plan)
+    r.pets, e.pet_allergies = ["cat"], ["cat"]
+    r.smokes, e.avoid_smoking = True, True
+    r.languages, r.language_required = ["so"], True
+    e.languages = ["sv"]
+    c, _ = codes(small_world, small_plan, scenario=sc)
+    assert {"PET_ALLERGY", "SMOKING_EXPOSURE", "LANGUAGE_REQUIRED"} <= set(c)
+
+
+def test_optimizer_respects_hard_wishes(small_world):
+    """Make wishes binding for a few recipients and re-optimise: the plan stays valid
+    and nobody excluded by a hard wish is assigned."""
+    from notana_planner.planner import World, plan_day
+
+    sc = copy.deepcopy(small_world.scenario)
+    emps = sorted(sc.employees.values(), key=lambda e: e.id)
+    for r in sorted(sc.recipients.values(), key=lambda r: r.id)[:12]:
+        r.gender_preference, r.gender_strict, r.gender_scope = "F", True, "all"
+        r.pets = ["dog"]
+    for e in emps[::4]:
+        e.pet_allergies = ["dog"]
+    w = World(sc, small_world.base_matrix, weights=small_world.weights, settings=small_world.settings)
+    plan = plan_day(w, time_limit_s=6)
+    rep = validate_plan(sc, w.travel(), plan)
+    assert rep.valid, rep.errors[:3]
+    for vid, a in plan.assignments.items():
+        r = sc.recipients[sc.visits[vid].recipient_id]
+        for eid in a.employee_ids:
+            if r.gender_strict:
+                assert sc.employees[eid].gender == "F"
+            assert not set(r.pets) & set(sc.employees[eid].pet_allergies)

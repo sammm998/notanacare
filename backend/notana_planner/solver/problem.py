@@ -86,6 +86,21 @@ def missing_for_role(emp: Employee, visit: Visit, recipient: CareRecipient, role
         missing += [f"delegation:{d}" for d in visit.required_delegations if d not in emp.delegations]
     if emp.id in recipient.avoid_employee_ids:
         missing.append("recipient-avoids-employee")
+    # Hard wishes and work-environment rules (all staff on the visit)
+    if (
+        recipient.gender_strict
+        and recipient.gender_preference
+        and (recipient.gender_scope == "all" or visit.intimate_care)
+        and emp.gender != recipient.gender_preference
+    ):
+        missing.append(f"gender:{recipient.gender_preference}")
+    allergic = [p for p in recipient.pets if p in emp.pet_allergies]
+    if allergic:
+        missing.append(f"pet-allergy:{','.join(allergic)}")
+    if recipient.smokes and emp.avoid_smoking:
+        missing.append("smoke-free-workplace")
+    if role == 0 and recipient.language_required and not set(recipient.languages) & set(emp.languages):
+        missing.append(f"language:{'/'.join(recipient.languages)}")
     return missing
 
 

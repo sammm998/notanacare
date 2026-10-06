@@ -17,6 +17,7 @@ Rules (per care recipient, interventions sorted by preferred time):
 
 from __future__ import annotations
 
+from .catalog import INTIMATE_TYPES
 from .domain import CareRecipient, Intervention, TimingKind, Visit, VisitStatus
 
 MAX_ANCHOR_GAP = 45
@@ -48,6 +49,7 @@ def _make_visit(vid: str, recipient: CareRecipient, group: list[Intervention]) -
         continuity_preference=recipient.continuity_weight,
         status=VisitStatus.UNPLANNED,
         slot=str(group[0].source.get("slot", "")),
+        intimate_care=any(i.type in INTIMATE_TYPES for i in group),
     )
 
 

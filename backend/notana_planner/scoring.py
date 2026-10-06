@@ -102,6 +102,27 @@ def score_plan(
                     roles_preferred += 1
                 else:
                     continuity_pen += weights.continuity_preferred_bonus * r.continuity_weight
+    # Wishes: gender, language, preferred area (strict variants are validator rules)
+    gender_total = gender_met = lang_total = lang_met = outside_zone = 0
+    wish_pen = 0
+    for vid in planned:
+        v = visits[vid]
+        r = scenario.recipients[v.recipient_id]
+        staff = [emps[e] for e in plan.assignments[vid].employee_ids if e in emps]
+        if r.gender_preference and (r.gender_scope == "all" or v.intimate_care):
+            gender_total += 1
+            wrong = sum(1 for e in staff if e.gender != r.gender_preference)
+            gender_met += wrong == 0
+            if not r.gender_strict:
+                wish_pen += weights.gender_wish_mismatch * wrong
+        if r.languages:
+            lang_total += 1
+            lang_met += any(set(r.languages) & set(e.languages) for e in staff)
+            wish_pen += weights.language_wish_mismatch * sum(1 for e in staff if not set(r.languages) & set(e.languages))
+        for e in staff:
+            if e.preferred_zones and r.zone not in e.preferred_zones:
+                outside_zone += 1
+                wish_pen += weights.outside_preferred_zone
     staff_per_recipient = (
         statistics.mean(len(s) for s in distinct_staff.values()) if distinct_staff else 0.0
     )
@@ -167,6 +188,7 @@ def score_plan(
         "travel_distance": round(weights.travel_km * travel_km),
         "preferred_time_deviation": weights.preferred_time_minute * pref_dev_total,
         "continuity": round(continuity_pen),
+        "wishes": wish_pen,
         "overtime": weights.overtime_minute * overtime,
         "idle_span": weights.idle_minute * span_min,
     }
@@ -193,6 +215,11 @@ def score_plan(
         "continuity_known_share": round(roles_known / max(1, roles_total), 3),
         "continuity_preferred_share": round(roles_preferred / max(1, recip_with_pref), 3) if recip_with_pref else None,
         "staff_per_recipient": round(staff_per_recipient, 2),
+        "gender_wish_visits": gender_total,
+        "gender_wish_met_share": round(gender_met / gender_total, 3) if gender_total else None,
+        "language_wish_visits": lang_total,
+        "language_wish_met_share": round(lang_met / lang_total, 3) if lang_total else None,
+        "visits_outside_preferred_zone": outside_zone,
         "overtime_minutes": overtime,
         "idle_minutes": idle_min,
         "care_minutes": care_total,

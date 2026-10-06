@@ -27,10 +27,13 @@ python -m uvicorn notana_planner.api:app --port 8000    # open http://localhost:
 ```
 
 1. **Generate scenario** (default: Stockholm, seed 42, ~5,000 interventions → ~590 visits, ~158 recipients, 100 employees).
+   Choose *Horizon: a week* to get Monday–Sunday (≈35,000 interventions, 140 employees with rosters).
 2. **Optimise** (≈25 s). The header shows **VALID ✓ (independent validator)** or **INVALID** with the violations.
 3. Explore the **Map**, **Timeline** (Gantt), **Unplanned / conflicts** (each with a reason) and **Score & validation**.
 4. Set the **clock** (e.g. 10:14), apply an **incident** and read the **Re-planning report** (before/after, phases used, every changed visit).
 5. **Experiments** tab: run strategies A–D on the same scenario and incidents.
+6. Week scenarios: pick a day in the **Week** bar, or **Optimise whole week**; the **Week** tab shows
+   every day, hours per employee and the cross-day rules (dygnsvila, veckovila, weekly hours).
 
 Headless: `python demo.py --sick 2 --clock 10:14` · Tests: `python -m pytest` (35 tests, ≈2 min).
 
@@ -72,7 +75,9 @@ backend/notana_planner/
     timetabling.py   CP-SAT: exact start times for the chosen sequences (cross-route sync)
     lns.py           enhanced repair (ejection chains) — strategy B
     engine.py        pipeline orchestration
-  validator.py       INDEPENDENT validator (imports nothing from solver/)
+  working_time.py    Arbetstidslagen -> per-employee planning bounds (break windows, latest end)
+  week.py            week planning (Mon..Sun), continuity carry-over, cross-day validator
+  validator.py       INDEPENDENT validator (imports nothing from solver/ or working_time.py)
   scoring.py         objective score breakdown recomputed from the plan
   diagnostics.py     why is a visit unplanned? (structured reasons from gap analysis)
   incidents.py       sick / delay / traffic / medication moved / extra staff / cancellation
@@ -113,6 +118,9 @@ frontend/            no-build ES modules: map (vendored Leaflet), Gantt, panels
 | Hard time windows | cumul range of each visit node | `TIME_WINDOW_VIOLATED` |
 | Double staffing: exactly 2 distinct, synchronised (± tolerance), both full duration | pair construction + CP-SAT `|s_a − s_b| ≤ tol` | `WRONG_STAFF_COUNT`, `SAME_EMPLOYEE_TWICE`, `DOUBLE_STAFFING_NOT_SYNCHRONISED` |
 | Mandatory meal breaks / unavailable gaps (split shifts, sickness) | break nodes at the team office | `BREAK_MISSING`, `DURING_UNAVAILABILITY` |
+| Strict gender requirement (intimate care or all visits), pet allergy, smoke-free workplace (all staff); required language (lead) | allowed vehicles per role | `GENDER_REQUIREMENT_VIOLATED`, `PET_ALLERGY`, `SMOKING_EXPOSURE`, `LANGUAGE_REQUIRED` |
+| Arbetstidslagen: max 5 h work without a rest (15 §), max 10 h work per day, 11 h dygnsvila (13 §) | break windows clamped, latest route end capped (`working_time.py`) | `ATL_CONTINUOUS_WORK`, `MAX_DAILY_WORK`, `DAILY_REST_VIOLATED` |
+| Week: 11 h rest between work days, 36 h veckovila per 7 days (14 §), weekly hours ≤ contract + overtime | roster (2 consecutive days off) + tonight's end capped by tomorrow's start | `week.validate_week`: `DAILY_REST_VIOLATED`, `WEEKLY_REST_VIOLATED`, `WEEKLY_HOURS_EXCEEDED` |
 | Locked, started and completed visits never move | frozen prefix + pinned nodes | `LOCKED_VISIT_MOVED`, `LOCKED_VISIT_REMOVED` |
 | Recipient never double-booked | non-overlap constraints | `RECIPIENT_DOUBLE_BOOKED` |
 | Completeness: each visit is planned **or** reported unplanned | — | `VISIT_MISSING`, `PLANNED_AND_UNPLANNED` |
@@ -124,9 +132,36 @@ Hard constraints are model constraints, never large penalties. The only large pe
 
 Priority-weighted unplanned visits (dominant) · travel time · travel distance · deviation from
 preferred time · continuity (known / preferred staff) · workload balance (care minutes above fair
-share) · overtime · idle span · **re-planning stability**: employee change, change of communicated
+share) · overtime · idle span · **wishes**: non-strict gender wish, preferred language, employee's
+preferred area · **re-planning stability**: employee change, change of communicated
 start time, touching an unaffected route, dropping an already-communicated visit. The **Score**
 tab recomputes every term from the plan, so you can see *why* one plan beats another.
+
+### Wishes and person attributes
+
+Generated with their own random stream (switch off with *Wishes & person attributes*):
+
+| Who | Attribute | Share (default) | Rule |
+|---|---|---|---|
+| Recipient | wishes female / male staff, for intimate care (hygiene, shower, toileting, dressing …) or all visits | 22 %, of which 40 % strict | strict: hard (all staff); else weighted wish |
+| Recipient | mother tongue other than Swedish (Finnish, Arabic, Persian, Somali, BCS, Spanish, Polish) | ≈ 10 % | required (often with dementia): lead must speak it; else wish |
+| Recipient | dog / cat in the home · smokes | 25 % · 8 % | hard for allergic / smoke-free staff |
+| Employee | gender (80 % women) · languages · pet allergy · smoke-free requirement · bike instead of car · preferred area | 8 % allergic, 12 % smoke-free, 12 % bike | bike: own travel matrix (×1.35) in optimizer and validator |
+
+The generator keeps hard wishes coherent with the roster, as a unit manager would: if a language is
+required, at least two employees who are on shift and hold the visit's delegations speak it; a strict
+gender wish that the roster cannot honour for some visit becomes a weighted wish. Diagnostics name
+wishes when they are the reason a visit is unplanned (`WISHES_EXCLUDE_ALL_STAFF`).
+
+### Week planning (`week.py`)
+
+`generate_week` builds seven day scenarios for the same recipients and staff. `employee_count` is the
+staff on duty per day; the head count is ×7/5. Everyone keeps one shift type and has two consecutive
+days off, spread evenly per shift type and team. Daily needs repeat with day-to-day variation;
+shower (2/week), cleaning (1), laundry (1), shopping (2) and walks (3) follow weekly frequencies.
+Days are optimised Monday→Sunday; an employee who served a recipient becomes "known" for the following
+days (continuity grows through the week). Tonight's latest end is capped by tomorrow's shift start
+minus 11 h. `validate_week` re-checks the cross-day rules from the plans themselves.
 
 ### Real-time re-planning (`replanning.py`)
 
@@ -231,4 +266,5 @@ component helps. The mode exists to measure exactly that once a real LLM/JEV com
 `GET /api/plans/{id}` · `GET /api/plans/{id}/visits/{vid}` (explanation) ·
 `POST /api/scenarios/{id}/incidents` → job · `POST /api/plans/{id}/validate` ·
 `POST /api/scenarios/{id}/visits/{vid}/lock` · `POST /api/experiments` → job ·
-`GET /api/scenarios/{id}/export` · OpenAPI docs at `/docs`.
+`GET /api/scenarios/{id}/export` · `GET /api/weeks/{id}` (week summary + week validation) ·
+`POST /api/weeks/{id}/plan` → job · OpenAPI docs at `/docs`.

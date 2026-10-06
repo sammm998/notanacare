@@ -105,7 +105,14 @@ def _employee_state(world: World, plan: Plan, eid: str, prefix: list[RouteStop],
         location=loc,
         taken_break_ids=set(range(n_taken)),
         travel=world.travel(),
+        rules=world.scenario.rules,
     )
+    rules = world.scenario.rules
+    if v is not None and n_taken and rules.enabled:
+        # ATL: the stretch after the break actually taken is at most 5 h.
+        taken_end = max(s.end for s in prefix if s.kind == "break")
+        if not any(b.kind == "break" for b in v.breaks):
+            v.end_time = max(v.start_time, min(v.end_time, taken_end + rules.max_continuous_work_min))
     if v is not None:
         # A meal break must stay reachable: leave at least the travel time to the office.
         reach = v.start_time + v.travel.minutes(v.start_location, v.break_location or v.start_location)

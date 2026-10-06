@@ -49,6 +49,7 @@ class CareRecipient:
     address: str
     zone: str
     continuity_weight: float = 1.0  # how much continuity matters for this person
+    gender: str = "F"
     preferred_employee_ids: list[str] = field(default_factory=list)
     avoid_employee_ids: list[str] = field(default_factory=list)  # hard exclusion
     known_employee_ids: list[str] = field(default_factory=list)  # continuity history
@@ -147,6 +148,8 @@ class Employee:
     travel_mode: str = "car"  # "car" | "bike" (does not drive: bike / public transport)
     preferred_zones: list[str] = field(default_factory=list)  # wish, weighted
     contract_minutes_per_week: int = 2400  # sysselsättningsgrad (40 h = full time)
+    latest_end_by_rest: int | None = None  # week planning: tomorrow's start - 11 h dygnsvila
+    days_off: list[int] = field(default_factory=list)  # week roster: 0 = Monday
     shift_name: str = ""
 
     @property
@@ -179,7 +182,7 @@ class ScenarioConfig:
     target_interventions: int = 5000
     employee_count: int = 100
     area: str = "stockholm"
-    staffing_pressure: float = 0.3  # 0 = generous full-time mix, 1 = many part-time shifts
+    staffing_pressure: float = 0.15  # 0 = generous full-time mix, 1 = many part-time shifts
     double_staffing_pct: float = 0.12
     strict_window_pct: float = 0.30
     skill_requirement_pct: float = 0.55

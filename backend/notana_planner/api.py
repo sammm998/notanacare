@@ -25,7 +25,7 @@ from .diagnostics import diagnose_unplanned
 from .domain import Plan, ScenarioConfig, fmt_time, to_jsonable
 from .experiments import ExperimentSpec, run_experiment
 from .explain import explain_plan_text, explain_visit, plan_diff
-from .generator import generate_scenario
+from .generator import generate_scenario, generate_week
 from .geo import AREAS
 from .incidents import INCIDENT_KINDS, Incident, apply_incident
 from .planner import STRATEGIES, World, plan_day
@@ -33,6 +33,7 @@ from .replanning import clone_world, replan_with_strategy
 from .store import Database, Session, SessionStore
 from .travel import make_provider
 from .validator import validate_plan
+from .week import plan_week, week_summary
 
 log = logging.getLogger("notana")
 ROOT = Path(__file__).resolve().parents[2]
@@ -42,6 +43,7 @@ STORE = SessionStore(DB)
 POOL = ThreadPoolExecutor(max_workers=int(os.environ.get("NOTANA_WORKERS", "2")))
 JOBS: dict[str, dict[str, Any]] = {}
 WORLD_SNAPSHOTS: dict[str, World] = {}  # plan id -> world state the plan belongs to
+WEEKS: dict[str, list[str]] = {}  # week id -> day scenario ids (Mon..Sun)
 
 app = FastAPI(title="Notana Care Planning Simulator", version="1.0.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
@@ -95,11 +97,30 @@ def scenario_payload(s: Session) -> dict:
             "duration": v.total_duration_minutes, "staff": v.required_employee_count, "priority": v.priority,
             "timing": v.timing.value, "skills": v.required_skills, "delegations": v.required_delegations,
             "slot": v.slot, "interventions": len(v.intervention_ids), "types": types, "locked": v.locked,
+            "intimate": v.intimate_care,
             "status": v.status.value,
             "has_medication": any(t in ("medication", "insulin", "eye_drops") for t in types),
         })
+    R, E = sc.recipients.values(), sc.employees.values()
     return {
         "id": sc.id,
+        "day": sc.day,
+        "weekday": sc.weekday,
+        "week": week_ref(s.week_id) if s.week_id else None,
+        "rules": to_jsonable(sc.rules),
+        "wishes": {
+            "gender_preference": sum(1 for r in R if r.gender_preference),
+            "gender_strict": sum(1 for r in R if r.gender_strict),
+            "language": sum(1 for r in R if r.languages),
+            "language_required": sum(1 for r in R if r.language_required),
+            "pets": sum(1 for r in R if r.pets),
+            "smokes": sum(1 for r in R if r.smokes),
+            "male_staff": sum(1 for e in E if e.gender == "M"),
+            "bike_staff": sum(1 for e in E if e.travel_mode == "bike"),
+            "pet_allergic_staff": sum(1 for e in E if e.pet_allergies),
+            "smoke_free_staff": sum(1 for e in E if e.avoid_smoking),
+            "intimate_visits": sum(1 for v in sc.visits.values() if v.intimate_care),
+        },
         "config": to_jsonable(sc.config),
         "area": sc.area_name,
         "center": AREAS[sc.config.area].center,
@@ -128,6 +149,17 @@ def scenario_payload(s: Session) -> dict:
     }
 
 
+def week_ref(wid: str) -> dict:
+    days = []
+    for sid in WEEKS.get(wid, []):
+        s = STORE.sessions.get(sid)
+        if s is None:
+            continue
+        days.append({"day": s.world.scenario.day, "weekday": s.world.scenario.weekday, "scenario_id": sid,
+                     "current_plan_id": s.current_plan_id})
+    return {"id": wid, "days": days}
+
+
 def plan_payload(p: Plan) -> dict:
     d = to_jsonable(p)
     d["summary_text"] = explain_plan_text(p)
@@ -140,13 +172,15 @@ class ScenarioIn(BaseModel):
     target_interventions: int = Field(5000, ge=100, le=12000)
     employee_count: int = Field(100, ge=2, le=300)
     area: str = "stockholm"
-    staffing_pressure: float = Field(0.3, ge=0, le=1)
+    staffing_pressure: float = Field(0.15, ge=0, le=1)
     double_staffing_pct: float = Field(0.12, ge=0, le=0.6)
     strict_window_pct: float = Field(0.30, ge=0, le=1)
     skill_requirement_pct: float = Field(0.55, ge=0, le=1)
     travel_time_multiplier: float = Field(1.0, ge=0.3, le=4)
     double_staffing_sync_tolerance: int = Field(0, ge=0, le=15)
     breaks_enabled: bool = True
+    preferences_enabled: bool = True
+    days: int = Field(1, ge=1, le=7)  # 1 = one day, >1 = a full week (Mon..Sun)
     travel_provider: str = "auto"
 
 
@@ -218,12 +252,82 @@ def create_scenario(body: ScenarioIn) -> dict:
     cfg = ScenarioConfig(**{k: v for k, v in body.model_dump().items() if k != "travel_provider"})
     if cfg.area not in AREAS:
         raise HTTPException(400, f"unknown area {cfg.area}")
+    if cfg.days > 1:
+        return create_week(cfg, body.travel_provider)
     sc = generate_scenario(cfg, scenario_id="S-" + uuid.uuid4().hex[:8])
     world = World.create(sc, provider=make_provider(body.travel_provider))
     s = Session(sc.id, world)
     STORE.add(s)
     DB.save_scenario(sc.id, to_jsonable(cfg), scenario_payload(s)["counts"])
     return scenario_payload(s)
+
+
+def create_week(cfg: ScenarioConfig, travel_provider: str) -> dict:
+    wid = "W-" + uuid.uuid4().hex[:8]
+    scenarios = generate_week(cfg, scenario_id=wid)
+    first = World.create(scenarios[0], provider=make_provider(travel_provider))
+    WEEKS[wid] = [sc.id for sc in scenarios]
+    for sc in scenarios:
+        # Same addresses every day: one travel matrix for the week.
+        w = first if sc is scenarios[0] else World(
+            sc, first.base_matrix, weights=ObjectiveWeights.from_dict(first.weights.to_dict()),
+            settings=SolverSettings(**first.settings.to_dict()),
+        )
+        s = Session(sc.id, w, week_id=wid)
+        STORE.add(s)
+        DB.save_scenario(sc.id, to_jsonable(sc.config), {"week": wid, "day": sc.day, "visits": len(sc.visits)})
+    return scenario_payload(STORE.get(scenarios[0].id))
+
+
+def _week(wid: str) -> list[Session]:
+    if wid not in WEEKS:
+        raise HTTPException(404, "unknown week (sessions are in memory; regenerate from the seed)")
+    sessions = [STORE.sessions.get(sid) for sid in WEEKS[wid]]
+    if any(s is None for s in sessions):
+        raise HTTPException(404, "week evicted from memory; regenerate from the seed")
+    return sessions  # type: ignore[return-value]
+
+
+@app.get("/api/weeks/{wid}")
+def get_week(wid: str) -> dict:
+    sessions = _week(wid)
+    out = week_summary([s.world.scenario for s in sessions],
+                       [s.plans.get(s.current_plan_id) if s.current_plan_id else None for s in sessions])
+    out["id"] = wid
+    return out
+
+
+@app.post("/api/weeks/{wid}/plan")
+def optimize_week(wid: str, body: PlanIn) -> dict:
+    sessions = _week(wid)
+    if body.strategy not in STRATEGIES:
+        raise HTTPException(400, f"unknown strategy; choose from {list(STRATEGIES)}")
+    by_world = {id(s.world): s for s in sessions}
+
+    def plan_and_record(world: World, strategy: str, limit: float | None) -> Plan:
+        s = by_world[id(world)]
+        with s.lock:
+            if body.weights:
+                world.weights = ObjectiveWeights.from_dict({**world.weights.to_dict(), **body.weights})
+            if body.max_overtime_min is not None:
+                world.settings.max_overtime_min = body.max_overtime_min
+            plan = plan_day(world, strategy, limit)
+            s.plans[plan.id] = plan
+            s.current_plan_id = plan.id
+            WORLD_SNAPSHOTS[plan.id] = clone_world(world)
+            DB.save_plan(plan)
+            ev = {"type": "plan", "plan_id": plan.id, "strategy": strategy, "summary": explain_plan_text(plan)}
+            s.history.append(ev)
+            DB.save_event(s.id, "plan", ev)
+            return plan
+
+    def work(job: dict) -> dict:
+        plans = plan_week([s.world for s in sessions], body.strategy, body.time_limit_s,
+                          progress=job["progress"].append, plan_fn=plan_and_record)
+        return {"week_id": wid, "plan_ids": [p.id for p in plans],
+                "valid": all(p.validation.get("valid") for p in plans)}
+
+    return submit("plan-week", work)
 
 
 @app.get("/api/scenarios/{sid}")
