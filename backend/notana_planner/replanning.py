@@ -222,9 +222,10 @@ def build_repair_problem(
         emps = list(a.employee_ids) if a else []
         inside = [e for e in emps if e in in_problem]
         if a is None:
-            # Previously unplanned (or new) visit: try it if the incident may help.
-            if vid in released or effect.widen_to_unplanned or employees is None:
-                add_task(vid)
+            # Previously unplanned (or new) visit: try it, since the incident can free
+            # capacity too (e.g. the partner of a released double-staffed visit).
+            # It is never counted as "lost" and only lands on employees in the problem.
+            add_task(vid)
             continue
         if not inside and vid not in released:
             continue  # untouched route keeps it

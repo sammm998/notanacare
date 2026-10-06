@@ -35,7 +35,7 @@ python -m uvicorn notana_planner.api:app --port 8000    # open http://localhost:
 6. Week scenarios: pick a day in the **Week** bar, or **Optimise whole week**; the **Week** tab shows
    every day, hours per employee and the cross-day rules (dygnsvila, veckovila, weekly hours).
 
-Headless: `python demo.py --sick 2 --clock 10:14` · Tests: `python -m pytest` (35 tests, ≈2 min).
+Headless: `python demo.py --sick 2 --clock 10:14` · Tests: `python -m pytest` (53 tests, ≈10 min).
 
 Optional environment (see `.env.example`, never commit keys):
 
@@ -166,6 +166,9 @@ minus 11 h. `validate_week` re-checks the cross-day rules from the plans themsel
 ### Real-time re-planning (`replanning.py`)
 
 * Everything started by the clock (visits, breaks, gaps) is frozen and copied verbatim.
+* Previously unplanned visits are part of every phase: an incident can free capacity too (the partner
+  of a released double-staffed visit), and the report says how many of them could now be planned.
+  They are never counted as "lost" and only land on employees inside the neighbourhood.
 * **Phase 1, local repair**: affected employees plus the 6 helpers with the most real openings for
   the released visits (exact gap check), over a 3-hour horizon. The helpers' later visits are pinned
   and all other routes are untouched.
@@ -239,12 +242,16 @@ component helps. The mode exists to measure exactly that once a real LLM/JEV com
 
 * The requested shape (≈5,000 interventions of 4–10 min, 6–12 per visit, ≤4 visits/day, ~100
   employees) implies ≈ 5 h of care per employee per day, so it is **inherently tight**. Defaults use
-  realistic Swedish home-care shift templates (early, day, late, *delad tur* split shifts,
-  part-time) with meal breaks between demand peaks.
-* With the defaults (seed 42, pressure 0.3), the day plan leaves about **3 % of visits unplanned**
-  (≈ 18–21 of 587; 19 in the run above), each with a structured reason. Raise *staffing pressure* or remove employees to
-  see real capacity problems, or add *extra pool staff* to see them resolved. The engine never shortens
-  care and never hides a shortage.
+  Swedish home-care shift templates that comply with Arbetstidslagen (early, late, *delad tur*
+  07:30–12:00 + 16:30–20:30, part-time) with meal breaks between demand peaks.
+* With the defaults (pressure 0.15, wishes on), one day leaves **4–8 % of visits unplanned**
+  depending on the seed (seed 42: 22 of 587; seed 43: 35; seed 44: 47), each with a structured reason
+  and every plan VALID. Arbetstidslagen costs the most capacity (shorter split shift, no stretch over
+  5 h); bike staff and hard wishes cost another 7–15 visits a day. A full default week (35,253
+  interventions, 4,167 visits, 140 employees) plans 3,805 visits (91 %) in about 3 minutes, all
+  seven days VALID and the week rules met. Raise *staffing pressure* or remove employees to see real
+  capacity problems, or add *extra pool staff* to see them resolved. The engine never shortens care
+  and never hides a shortage.
 * Unplanned diagnostics are evaluated **without moving other visits**. *"No opening"* means none
   exists in the current plan, not a proof that no plan could include the visit.
 

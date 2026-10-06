@@ -28,7 +28,7 @@ def main() -> None:
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--interventions", type=int, default=5000)
     ap.add_argument("--employees", type=int, default=100)
-    ap.add_argument("--pressure", type=float, default=0.3)
+    ap.add_argument("--pressure", type=float, default=0.15)
     ap.add_argument("--time-limit", type=float, default=25)
     ap.add_argument("--clock", default="10:14")
     ap.add_argument("--sick", type=int, default=1, help="number of employees calling in sick")
