@@ -32,6 +32,50 @@ ROUTE_MATRIX_URL = "https://routes.googleapis.com/distanceMatrix/v2:computeRoute
 BLOCK = 25
 
 
+def matrix_cache_key(locations: list[Location], departure_minute: int) -> str:
+    coords = "|".join(f"{loc.lat:.5f},{loc.lon:.5f}" for loc in locations)
+    bucket = departure_minute // 60  # one matrix per departure hour
+    return hashlib.sha256(f"{coords}#{bucket}".encode()).hexdigest()[:24]
+
+
+def load_cached_matrix(locations: list[Location], departure_minute: int = 8 * 60,
+                       cache_dir: str | Path | None = None) -> BaseMatrix | None:
+    """A Google matrix fetched earlier for exactly these addresses, or None. Never calls the API."""
+    d = Path(cache_dir or os.environ.get("NOTANA_CACHE_DIR", "data/cache"))
+    path = d / f"google_matrix_{matrix_cache_key(locations, departure_minute)}.json"
+    if not path.exists():
+        return None
+    try:
+        data = json.loads(path.read_text())
+    except (OSError, ValueError):
+        return None
+    return BaseMatrix(
+        location_ids=[loc.id for loc in locations],
+        minutes=data["minutes"],
+        km=data["km"],
+        source=data["source"],
+        notes=data.get("notes", []) + ["loaded from disk cache"],
+    )
+
+
+class CachedGoogleOrSynthetic(TravelTimeProvider):
+    """No API calls: a Google matrix already in the cache for these addresses (free),
+    otherwise the synthetic estimate. Used unless Google is explicitly switched on."""
+
+    name = "synthetic"
+    memoize = False  # the disk cache may gain a Google matrix later; checking it is cheap
+
+    def __init__(self, fallback: TravelTimeProvider | None = None) -> None:
+        self.fallback = fallback or SyntheticTravelTimeProvider()
+
+    def build_matrix(self, locations: list[Location], departure_minute: int = 8 * 60) -> BaseMatrix:
+        cached = load_cached_matrix(locations, departure_minute)
+        if cached is not None:
+            cached.notes.append("Google live traffic is off: no new API calls, the cached matrix is reused")
+            return cached
+        return self.fallback.build_matrix(locations, departure_minute)
+
+
 class _FatalRouteError(RuntimeError):
     """Key / permission / request errors: retrying will not help."""
 
@@ -69,22 +113,14 @@ class GoogleRoutesTravelTimeProvider(TravelTimeProvider):
 
     # -- caching -------------------------------------------------------------
     def _cache_key(self, locations: list[Location], departure_minute: int) -> str:
-        coords = "|".join(f"{loc.lat:.5f},{loc.lon:.5f}" for loc in locations)
-        bucket = departure_minute // 60  # one matrix per departure hour
-        return hashlib.sha256(f"{coords}#{bucket}".encode()).hexdigest()[:24]
+        return matrix_cache_key(locations, departure_minute)
 
     def build_matrix(self, locations: list[Location], departure_minute: int = 8 * 60) -> BaseMatrix:
         key = self._cache_key(locations, departure_minute)
         path = self.cache_dir / f"google_matrix_{key}.json"
-        if path.exists():
-            data = json.loads(path.read_text())
-            return BaseMatrix(
-                location_ids=[loc.id for loc in locations],
-                minutes=data["minutes"],
-                km=data["km"],
-                source=data["source"],
-                notes=data.get("notes", []) + ["loaded from disk cache"],
-            )
+        cached = load_cached_matrix(locations, departure_minute, self.cache_dir)
+        if cached is not None:
+            return cached
 
         synthetic = self.fallback.build_matrix(locations, departure_minute)
         n = len(locations)

@@ -48,8 +48,8 @@ Optional environment (see `.env.example`, never commit keys):
 
 | Variable | Effect |
 |---|---|
-| `GOOGLE_MAPS_API_KEY` | Google **Routes API** `computeRouteMatrix` travel times (traffic-aware, cached to disk). Without it: synthetic travel. |
-| `GOOGLE_MAPS_BROWSER_KEY` | Google Maps as the map background. A **separate** key, restricted to *Maps JavaScript API* and to your site URL (HTTP referrer), because it is visible in the browser. Without it: OpenStreetMap. |
+| `GOOGLE_MAPS_API_KEY` | Google **Routes API** travel times (traffic-aware, cached to disk), commute times and road lines. **Opt-in**: used only when *Google-restider med live-trafik* is ticked for a scenario, and only for addresses not in the cache. Unticked (default): no API calls; Google data already cached is reused for free, otherwise synthetic travel. *follow roads* on the map is also off by default. |
+| `GOOGLE_MAPS_BROWSER_KEY` | Google Maps as the map background, only when *Google-karta* is ticked on the Map tab (off by default). A **separate** key, restricted to *Maps JavaScript API* and to your site URL (HTTP referrer), because it is visible in the browser. The map is created only when the Map tab is opened; by default it uses OpenStreetMap. |
 | `ANTHROPIC_API_KEY` | Claude planning advisor for strategy C (`claude-opus-5-5`, override with `NOTANA_CLAUDE_MODEL`). Without it: deterministic advisor. |
 
 ### Deploy

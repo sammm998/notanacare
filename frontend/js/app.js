@@ -26,6 +26,10 @@ async function boot() {
   setBadge("#b-version", `version ${h.version || "?"}`, "muted");
   setBadge("#b-llm", h.llm_configured ? `advisor: Claude (${h.llm_model})` : "advisor: deterministic (no API key)", h.llm_configured ? "ok" : "muted");
   setBadge("#b-travel", `travel: ${h.travel_provider}${h.google_maps_configured ? "" : " (no Google key)"}`, "muted");
+  if (!h.google_maps_configured) {
+    $("#chk-google").disabled = true;
+    $("#lbl-google").title = "Ingen Google-nyckel (GOOGLE_MAPS_API_KEY) är satt på servern.";
+  }
   $$("#f-scenario input[type=range]").forEach((r) => {
     const out = r.nextElementSibling;
     const upd = () => (out.value = r.value);
@@ -34,17 +38,45 @@ async function boot() {
   });
   wire();
   renderIncidentFields();
-  if (!window.L) await new Promise((r) => window.addEventListener("load", r, { once: true }));
-  const provider = await initMap($("#map"), state.meta.map, {
-    onRecipient, onVisit: openVisit, onEmployee: selectEmployee, rerender: render,
-    onProviderFallback: (msg, code) => {
-      toast(msg, 15000);
-      setBadge("#map-provider", `map: OpenStreetMap${code ? ` (Google: ${code})` : ""}`, "warn");
-      $("#map-provider").title = msg;
-    },
-  });
-  setBadge("#map-provider", provider === "google" ? "map: Google Maps" : "map: OpenStreetMap", provider === "google" ? "ok" : "muted");
   if (!state.meta.map?.road_geometry) $("#lbl-roads").classList.add("hidden");
+  if (state.meta.map?.browser_key) $("#lbl-gmap").classList.remove("hidden");
+  $("#chk-gmap").addEventListener("change", () => ensureMap(true).then(render));
+}
+
+// The map is created only when the Map tab is opened, with OpenStreetMap (free).
+// Google Maps is used only when "Google-karta" is ticked (each load costs).
+let mapStarting = null;
+async function ensureMap(force = false) {
+  if (state.mapReady && !force) return;
+  if (mapStarting && !force) return mapStarting;
+  mapStarting = (async () => {
+    if (force) {
+      const old = $("#map");
+      const fresh = document.createElement("div");
+      fresh.id = old.id;
+      fresh.className = old.className;
+      fresh.style.cssText = old.style.cssText;
+      old.replaceWith(fresh);
+    }
+    if (!window.L) await new Promise((r) => window.addEventListener("load", r, { once: true }));
+    const useGoogle = $("#chk-gmap").checked && !!state.meta.map?.browser_key;
+    const provider = await initMap($("#map"), { ...state.meta.map, provider: useGoogle ? "google" : "leaflet" }, {
+      onRecipient, onVisit: openVisit, onEmployee: selectEmployee, rerender: render,
+      onProviderFallback: (msg, code) => {
+        toast(msg, 15000);
+        setBadge("#map-provider", `map: OpenStreetMap${code ? ` (Google: ${code})` : ""}`, "warn");
+        $("#map-provider").title = msg;
+      },
+    });
+    setBadge("#map-provider", provider === "google" ? "map: Google Maps" : "map: OpenStreetMap", provider === "google" ? "ok" : "muted");
+    state.mapReady = true;
+    state._mapScenario = null; // re-centre on the scenario
+  })();
+  try {
+    await mapStarting;
+  } finally {
+    mapStarting = null;
+  }
 }
 
 function setBadge(sel, text, cls) {
@@ -331,7 +363,7 @@ function isLostSession(err) {
 async function regenerateScenario() {
   const cfg = state.scenario?.config || {};
   const body = Object.fromEntries(CONFIG_KEYS.filter((k) => cfg[k] !== undefined).map((k) => [k, cfg[k]]));
-  body.travel_provider = $("#f-scenario [name=travel_provider]").value;
+  body.travel_provider = $("#chk-google").checked ? "google" : "synthetic";
   toast(`The server restarted (in-memory sessions are cleared on a restart or redeploy). Regenerating the same scenario from seed ${cfg.seed}…`, 8000);
   indexScenario(await runJob(api("POST", "/api/scenarios?background=true", body), "Regenerating scenario"));
   state.plan = state.parent = state.lastIncident = state.suggestions = state.autofix = null;
@@ -545,7 +577,10 @@ function switchTab(tab) {
   state.tab = tab;
   $$("#tabs button").forEach((b) => b.classList.toggle("active", b.dataset.tab === tab));
   $$(".tab").forEach((s) => s.classList.toggle("hidden", s.id !== `tab-${tab}`));
-  if (tab === "map") invalidate();
+  if (tab === "map") {
+    ensureMap().then(() => { invalidate(); render(); });
+    return;
+  }
   render();
 }
 
@@ -660,7 +695,8 @@ function wire() {
     e.preventDefault();
     const fd = new FormData(e.target);
     const body = {};
-    for (const [k, v] of fd.entries()) body[k] = ["area", "travel_provider"].includes(k) ? v : Number(v);
+    for (const [k, v] of fd.entries()) body[k] = k === "area" ? v : Number(v);
+    body.travel_provider = $("#chk-google").checked ? "google" : "synthetic";
     body.breaks_enabled = e.target.breaks_enabled.checked;
     body.preferences_enabled = e.target.preferences_enabled.checked;
     const btn = e.target.querySelector("button");

@@ -211,7 +211,9 @@ class ScenarioIn(BaseModel):
     breaks_enabled: bool = True
     preferences_enabled: bool = True
     days: int = Field(1, ge=1, le=7)  # 1 = one day, >1 = a full week (Mon..Sun)
-    travel_provider: str = "auto"
+    # "synthetic" (default, no API calls; reuses Google data already in the cache) or "google"
+    # (live-traffic travel times from Google Routes: costs API calls, only for addresses not cached yet)
+    travel_provider: str = "synthetic"
 
 
 class PlanIn(BaseModel):
@@ -251,10 +253,11 @@ class LockIn(BaseModel):
 # ------------------------------------------------------------------ endpoints
 @app.get("/api/health")
 def health() -> dict:
-    prov = make_provider()
+    key = bool(os.environ.get("GOOGLE_MAPS_API_KEY"))
     return {
         "ok": True,
-        "travel_provider": prov.name,
+        # Google Routes is opt-in per scenario (it costs API calls); the default makes none.
+        "travel_provider": "synthetic (Google opt-in)" if key else "synthetic",
         "google_maps_configured": bool(os.environ.get("GOOGLE_MAPS_API_KEY")),
         "llm_configured": bool(os.environ.get("ANTHROPIC_API_KEY")),
         "llm_model": os.environ.get("NOTANA_CLAUDE_MODEL", "claude-opus-5-5"),
@@ -304,6 +307,10 @@ def create_scenario(body: ScenarioIn, background: bool = False) -> dict:
 
 
 def _provider(name: str, progress=None):  # noqa: ANN001, ANN202
+    if (name or "synthetic").lower() not in ("google", "auto"):
+        from .travel.google_routes import CachedGoogleOrSynthetic
+
+        return CachedGoogleOrSynthetic()  # Google is opt-in: never call the API unless asked to
     prov = make_provider(name)
     if progress is not None and hasattr(prov, "progress"):
         prov.progress = progress

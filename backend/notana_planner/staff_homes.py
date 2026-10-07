@@ -210,7 +210,10 @@ def attach(employees: list[Employee], locations: dict[str, Location], area: str,
         home = homes[e.id]
         mode = "car" if e.travel_mode == "car" else "transit"
         k = _key(mode, home, office, source)
-        if k in cache:
+        g = _key(mode, home, office, "google")  # fetched earlier: free to reuse even when Google is off
+        if g in cache:
+            results[e.id] = (cache[g]["minutes"], cache[g]["km"], "google")
+        elif k in cache:
             results[e.id] = (cache[k]["minutes"], cache[k]["km"], source)
         else:
             todo.append((e.id, home, office, mode))

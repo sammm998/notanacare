@@ -42,7 +42,7 @@
           <label>Sync tolerance (min) <input name="double_staffing_sync_tolerance" type="number" min="0" max="15" value="0" /></label>
           <label class="check"><input name="breaks_enabled" type="checkbox" checked /> Meal breaks</label>
           <label class="check" title="Gender wishes, languages, pets / allergies, smoking, bike or car, preferred area"><input name="preferences_enabled" type="checkbox" checked /> Wishes &amp; person attributes</label>
-          <label>Travel source <select name="travel_provider"><option value="auto">auto (Google if key set)</option><option value="synthetic">synthetic</option><option value="google">Google Routes</option></select></label>
+          <label class="check" id="lbl-google" title="Restider med live-trafik från Google Routes. Kostar API-anrop, men bara för adresser som inte redan finns i cachen. Avstängt: inga nya anrop (redan hämtade Google-restider återanvänds gratis, annars uppskattning)."><input type="checkbox" id="chk-google" /> Google-restider med live-trafik <span class="hint">(kostar API-anrop)</span></label>
           <button type="submit" class="primary">Generate scenario</button>
         </form>
       </details>
@@ -119,10 +119,11 @@
           <label data-for="employee">Employee <select id="sel-emp"></select></label>
           <button data-for="employee" id="btn-prev-emp" title="Previous employee">‹</button>
           <button data-for="employee" id="btn-next-emp" title="Next employee">›</button>
-          <label data-for="employee" class="check" id="lbl-roads"><input type="checkbox" id="chk-roads" checked /> follow roads</label>
+          <label data-for="employee" class="check" id="lbl-roads" title="Hämtar vägens form från Google Routes för den visade rutten (kostar API-anrop)"><input type="checkbox" id="chk-roads" /> follow roads (Google)</label>
           <label data-for="team" class="hidden">Team <select id="sel-map-team"></select></label>
           <label data-for="all" class="check hidden"><input type="checkbox" id="chk-routes" /> all routes (faint)</label>
           <span class="legend"><i class="dot ok"></i>planned <i class="dot warn"></i>has unplanned visits <span class="pin">3</span> visit order <span class="pin dbl">2</span> double-staffed <span class="pin chg">4</span> changed by re-plan <span class="pin office">⌂</span> team office</span>
+          <label class="check hidden" id="lbl-gmap" title="Google Maps i stället för OpenStreetMap (kostar per kartladdning)"><input type="checkbox" id="chk-gmap" /> Google-karta</label>
           <span id="map-provider" class="badge muted"></span>
         </div>
         <div class="map-wrap">

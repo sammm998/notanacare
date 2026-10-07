@@ -63,3 +63,35 @@ def test_google_commute_is_fetched_once_then_cached(tmp_path, monkeypatch):
                                   or e.travel_mode != sc.employees[e.id].travel_mode])
     third = staff_homes.attach(list(again.employees.values()), again.locations, "stockholm", prov)
     assert third["requested_from_google"] == 0 and third["from_cache"] == len(again.employees)
+
+
+def test_google_is_opt_in_and_cached_data_is_reused_for_free(tmp_path, monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from notana_planner import api
+    from notana_planner.travel import google_routes as G
+
+    monkeypatch.setenv("NOTANA_CACHE_DIR", str(tmp_path))
+    monkeypatch.setenv("GOOGLE_MAPS_API_KEY", "test-key")
+    calls = []
+
+    def no_network(self, origins, dests, departure, travel_mode="DRIVE"):
+        calls.append(travel_mode)
+        raise AssertionError("Google must not be called when live traffic is off")
+
+    monkeypatch.setattr(G.GoogleRoutesTravelTimeProvider, "_request", no_network)
+    client = TestClient(api.app)
+    body = {"seed": 3, "target_interventions": 600, "employee_count": 10}
+    sc = client.post("/api/scenarios", json=body).json()  # default: Google off
+    assert calls == [] and sc["travel"]["source"] == "synthetic"
+    assert sc["commute"]["source"] == "estimate"
+
+    # A Google matrix fetched earlier for the same addresses is reused without calls.
+    s = api.STORE.get(sc["id"])
+    locs = list(s.world.scenario.locations.values())
+    n = len(locs)
+    path = tmp_path / f"google_matrix_{G.matrix_cache_key(locs, 8 * 60)}.json"
+    path.write_text(json.dumps({"minutes": [[0 if i == j else 7 for j in range(n)] for i in range(n)],
+                                "km": [[0.0] * n for _ in range(n)], "source": "google-routes", "notes": []}))
+    again = client.post("/api/scenarios", json=body).json()
+    assert calls == [] and again["travel"]["source"] == "google-routes"

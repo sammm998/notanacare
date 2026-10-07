@@ -41,6 +41,8 @@ _MATRIX_CACHE: dict[tuple, BaseMatrix] = {}
 
 def build_base_matrix(provider: TravelTimeProvider, locations: list[Location]) -> BaseMatrix:
     """In-process cache on top of whatever caching the provider does itself."""
+    if getattr(provider, "memoize", True) is False:
+        return provider.build_matrix(locations)
     key = (provider.name, tuple((loc.id, round(loc.lat, 6), round(loc.lon, 6)) for loc in locations))
     if key not in _MATRIX_CACHE:
         _MATRIX_CACHE[key] = provider.build_matrix(locations)

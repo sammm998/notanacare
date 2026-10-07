@@ -403,6 +403,7 @@ footer { margin-top: 64px; padding-top: 18px; border-top: 1px solid var(--line);
       <li><b>Railway</b> bygger <code>Dockerfile</code> från <code>main</code>. En process med avsikt, eftersom sessionerna ligger i minnet.</li>
       <li><b>SQLite</b> sparar revisionsspåret. ML-fall från appen sparas i <code>data/ml_cases.jsonl</code>. På Railway försvinner disken vid omstart om ingen volym är kopplad, men de medföljande fallen finns alltid kvar.</li>
       <li><b>Nycklar</b> (<code>ANTHROPIC_API_KEY</code>, <code>GOOGLE_MAPS_API_KEY</code>, <code>GOOGLE_MAPS_BROWSER_KEY</code>) sätts som miljövariabler och committas aldrig.</li>
+      <li><b>Google kostar bara när man ber om det.</b> Restider med live-trafik från Google Routes används bara när rutan <b>Google-restider med live-trafik</b> är ikryssad när scenariot genereras, och då bara för adresser som inte redan finns i cachen. Utan krysset görs inga anrop: Google-restider som redan hämtats återanvänds gratis, annars används uppskattningen. Kartan skapas först när fliken Karta öppnas och använder OpenStreetMap; Google Maps (<b>Google-karta</b>) och vägarnas form (<b>follow roads</b>) är avstängda som standard.</li>
       <li>Rekommenderat: minst 2 vCPU och 2–4 GB RAM. Det finns ingen inloggning, så lägg tjänsten bakom egen åtkomstkontroll.</li>
     </ul>
 
