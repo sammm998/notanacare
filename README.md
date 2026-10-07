@@ -276,6 +276,18 @@ closest pairs first (3 in parallel), the far pairs keep the synthetic estimate, 
 how many trips came from Google. Scenario generation runs as a background job with progress. The solver never calls an API: it reads a precomputed location matrix, and `TrafficConditions`
 (global / zone / corridor multipliers) are layered on top for incidents. The header shows the active source.
 
+**Where staff live and their commute** (`staff_homes.py`). Home addresses come from a staff register,
+`$NOTANA_CACHE_DIR/staff_homes_<area>.json` (`/data/cache` in Docker). An employee keeps the same home
+in every scenario and after restarts: a missing employee gets a plausible home once (seeded by area and
+employee id, not the scenario seed) and it is written to the register; real addresses can be entered in
+the file (address, lat, lon) and are never changed. The commute (home → team office, by car for drivers
+and public transport for the others) is computed once per address pair and stored in
+`commute_cache.json`: Google Routes (`DRIVE` / `TRANSIT`) when a key is set, otherwise a labelled
+estimate. New scenarios only ask Google for trips not yet in the cache. The commute is the employee's own
+time and is not part of the route; it is shown in the itinerary, on the map (⌂ and a dashed line to the
+office) and as a summary on the Insatser tab. On Railway, mount a volume at `/data` to keep the register
+and caches across deploys.
+
 ### Optional AI layers, and what they must not do
 
 * `PlanningAdvisor` (`advisor/`): `suggest_repair_strategy`, `analyze_conflict`, `explain_plan`,

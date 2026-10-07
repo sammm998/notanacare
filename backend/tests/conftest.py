@@ -1,10 +1,14 @@
 import copy
+import os
 import sys
+import tempfile
 from pathlib import Path
 
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+# Staff register and travel caches go to a temporary folder, never into the repository.
+os.environ.setdefault("NOTANA_CACHE_DIR", tempfile.mkdtemp(prefix="notana-cache-"))
 
 from notana_planner.domain import ScenarioConfig  # noqa: E402
 from notana_planner.generator import generate_scenario  # noqa: E402

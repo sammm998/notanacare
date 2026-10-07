@@ -310,6 +310,14 @@ export async function renderMap(state, opts) {
         });
       }
     }
+    const emp = state.empsById[eid];
+    if (emp?.home_lat != null) {
+      // Home and commute to the team office (own time, not part of the route).
+      const office = sc.locations[emp.start_location_id];
+      if (office) adapter.line([[emp.home_lat, emp.home_lon], [office.lat, office.lon]], { color: "#7a8594", weight: 2, opacity: 0.8, dashed: true });
+      adapter.badge([emp.home_lat, emp.home_lon], { text: "⌂", color: "#1d2733", fill: "#ffffff", size: 22, z: 430,
+        tip: `<b>Hem</b> ${esc(emp.home_address)}<br>${emp.commute_minutes ?? "?"} min till kontoret ${emp.commute_mode === "car" ? "med bil" : "med kollektivtrafik"}` });
+    }
     adapter.badge(pts[0], { text: "S", color: "#1d2733", fill: "#2a9d5b", textColor: "#fff", size: 22, z: 450, tip: "Start of the day" });
     adapter.badge(pts[pts.length - 1], { text: "E", color: "#1d2733", fill: "#d1495b", textColor: "#fff", size: 18, z: 440, tip: "End of the day" });
     if (opts.fit !== false) adapter.fit(pts);
@@ -382,6 +390,7 @@ export function renderItinerary(el, state, eid, geoSource, onVisit) {
   }
   el.innerHTML = `
     <div class="it-head"><b>${esc(e.id)}</b> ${esc(e.name)}<br><span class="hint">Team ${esc(e.team)} · shift ${hhmm(e.shift_start)}–${hhmm(e.shift_end)}</span>
+    ${e.home_address ? `<div class="hint it-home">🏠 Bor: ${esc(e.home_address)}${e.commute_minutes != null ? `<br>Till kontoret: <b>${e.commute_minutes} min</b> ${e.commute_mode === "car" ? "med bil" : "med kollektivtrafik"} · ${e.commute_km} km · ${e.commute_source === "google" ? "Google Routes" : "uppskattning"} (egen tid, ingår inte i rutten)` : ""}</div>` : ""}
     <div class="it-sum"><span><b>${visits.length}</b> visits</span><span><b>${Math.round(care / 6) / 10}</b> h care</span><span><b>${travel}</b> min travel</span></div>
     <div class="hint">${geoSource === "google-routes" ? "Lines follow roads (Google Routes)." : "Lines are straight between stops; travel times come from the travel matrix."} Numbers = visit order.</div></div>
     <ol class="itinerary">${out.join("")}</ol>`;

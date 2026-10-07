@@ -34,6 +34,7 @@ from .store import Database, Session, SessionStore
 from .travel import make_provider
 from .validator import validate_plan
 from . import intervention_view as IV
+from . import staff_homes
 from .live import run_live
 from .ml.cases import generate_cases
 from .ml.model import selector
@@ -163,6 +164,7 @@ def scenario_payload(s: Session) -> dict:
         "bases": sc.bases,
         "recipients": [to_jsonable(r) for r in sc.recipients.values()],
         "employees": [to_jsonable(e) for e in sc.employees.values()],
+        "commute": staff_homes.summary(list(sc.employees.values())),
         "visits": visits,
         "travel": {"source": tm.source, "notes": tm.base.notes, "traffic": s.world.traffic.to_dict(),
                    "multiplier": sc.config.travel_time_multiplier},
@@ -316,11 +318,24 @@ def _create(cfg: ScenarioConfig, travel_provider: str, progress=None) -> dict:  
     if progress:
         progress("generating interventions, visits and staff")
     sc = generate_scenario(cfg, scenario_id="S-" + uuid.uuid4().hex[:8])
-    world = World.create(sc, provider=_provider(travel_provider, progress))
+    provider = _provider(travel_provider, progress)
+    world = World.create(sc, provider=provider)
+    _attach_homes([sc], provider, progress)
     s = Session(sc.id, world)
     STORE.add(s)
     DB.save_scenario(sc.id, to_jsonable(cfg), scenario_payload(s)["counts"])
     return scenario_payload(s)
+
+
+def _attach_homes(scenarios: list, provider, progress=None) -> None:  # noqa: ANN001
+    """Homes from the staff register and commute times from the cache (Google only for new trips)."""
+    if progress:
+        progress("staff homes and commute times")
+    for sc in scenarios:
+        try:
+            staff_homes.attach(list(sc.employees.values()), sc.locations, sc.config.area, provider, progress)
+        except Exception as exc:  # noqa: BLE001 - information only, never block planning
+            log.warning("commute times unavailable: %s", exc)
 
 
 def create_week(cfg: ScenarioConfig, travel_provider: str, progress=None) -> dict:  # noqa: ANN001
@@ -328,7 +343,9 @@ def create_week(cfg: ScenarioConfig, travel_provider: str, progress=None) -> dic
     if progress:
         progress("generating Monday to Sunday")
     scenarios = generate_week(cfg, scenario_id=wid)
-    first = World.create(scenarios[0], provider=_provider(travel_provider, progress))
+    provider = _provider(travel_provider, progress)
+    first = World.create(scenarios[0], provider=provider)
+    _attach_homes(scenarios, provider, progress)
     WEEKS[wid] = [sc.id for sc in scenarios]
     for sc in scenarios:
         # Same addresses every day: one travel matrix for the week.

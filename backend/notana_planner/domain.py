@@ -151,6 +151,15 @@ class Employee:
     latest_end_by_rest: int | None = None  # week planning: tomorrow's start - 11 h dygnsvila
     days_off: list[int] = field(default_factory=list)  # week roster: 0 = Monday
     shift_name: str = ""
+    # Home and commute to the team office (staff register, see staff_homes.py); information only
+    home_address: str = ""
+    home_district: str = ""
+    home_lat: float | None = None
+    home_lon: float | None = None
+    commute_minutes: int | None = None
+    commute_km: float | None = None
+    commute_mode: str = ""  # "car" | "transit"
+    commute_source: str = ""  # "google" | "estimate"
 
     @property
     def travel_factor(self) -> float:

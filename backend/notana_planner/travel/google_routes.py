@@ -177,7 +177,7 @@ class GoogleRoutesTravelTimeProvider(TravelTimeProvider):
         return result
 
     def _request_with_retry(self, origins: list[Location], dests: list[Location], departure: str,
-                            deadline: float | None = None) -> tuple[list[dict], int]:
+                            deadline: float | None = None, travel_mode: str = "DRIVE") -> tuple[list[dict], int]:
         """Retry rate limits / transient errors with exponential backoff (honours Retry-After),
         but never past the time budget."""
         delay = 2.0
@@ -185,7 +185,7 @@ class GoogleRoutesTravelTimeProvider(TravelTimeProvider):
             if deadline is not None and attempt > 1 and time.monotonic() > deadline:
                 raise TimeoutError("time budget exhausted")
             try:
-                return self._request(origins, dests, departure), attempt
+                return self._request(origins, dests, departure, travel_mode), attempt
             except urllib.error.HTTPError as exc:
                 body = exc.read().decode(errors="replace")[:300]
                 if exc.code in (400, 401, 403, 404):
@@ -219,17 +219,19 @@ class GoogleRoutesTravelTimeProvider(TravelTimeProvider):
             target += dt.timedelta(days=1)
         return target.astimezone(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
-    def _request(self, origins: list[Location], dests: list[Location], departure: str) -> list[dict]:
+    def _request(self, origins: list[Location], dests: list[Location], departure: str,
+                 travel_mode: str = "DRIVE") -> list[dict]:
         def wp(loc: Location) -> dict:
             return {"waypoint": {"location": {"latLng": {"latitude": loc.lat, "longitude": loc.lon}}}}
 
         body = {
             "origins": [wp(o) for o in origins],
             "destinations": [wp(d) for d in dests],
-            "travelMode": "DRIVE",
-            "routingPreference": "TRAFFIC_AWARE",
+            "travelMode": travel_mode,
             "departureTime": departure,
         }
+        if travel_mode == "DRIVE":
+            body["routingPreference"] = "TRAFFIC_AWARE"
         req = urllib.request.Request(
             ROUTE_MATRIX_URL,
             data=json.dumps(body).encode(),

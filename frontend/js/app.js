@@ -85,6 +85,7 @@ async function loadInterventions(more) {
     if (!$("#iv-filter").options.length) {
       $("#iv-filter").innerHTML = Object.entries(d.summary.filters).map(([k, v]) => `<option value="${k}">${esc(v)}</option>`).join("");
     }
+    d.commute = state.scenario?.commute;
     renderInterventionHead($("#iv-head"), d, !!state.plan);
     renderInterventionRows($("#iv-table"), d.rows, more, openVisit);
     state.iv = { offset: offset + d.rows.length, key };

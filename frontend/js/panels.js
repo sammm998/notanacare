@@ -360,6 +360,12 @@ export function renderML(el, d) {
 }
 
 
+function commuteText(c) {
+  if (!c) return "";
+  const src = c.source === "google" ? "Google Routes" : c.source === "estimate" ? "uppskattning" : "Google + uppskattning";
+  return ` · Resa hemifrån till kontoret: median ${c.median_minutes} min, 90 % ≤ ${c.p90_minutes} min${c.over_45 ? `, ${c.over_45} över 45 min` : ""} (${src})`;
+}
+
 export function renderInterventionHead(el, d, hasPlan) {
   const s = d.summary;
   const pctTxt = (a, b) => (b ? `${Math.round(1000 * a / b) / 10} %` : "–");
@@ -367,7 +373,7 @@ export function renderInterventionHead(el, d, hasPlan) {
     el.innerHTML = `<div class="iv-hero"><div><div class="eyebrow">Simulerad dag · ej optimerad</div><h2>Dagens insatser</h2>
       <div class="sub">${esc(s.area)} · Hemtjänst · seed ${s.seed}</div></div></div>
       <div class="iv-count"><h3>${fmtNum(s.interventions_total)} enskilda insatser</h3><span class="r">Optimera dagen för att tilldela dem</span></div>
-      <p class="hint">${s.visits_total} besök · ${s.recipients} brukare · ${s.employees} medarbetare</p>`;
+      <p class="hint">${s.visits_total} besök · ${s.recipients} brukare · ${s.employees} medarbetare${commuteText(d.commute)}</p>`;
     return;
   }
   const cls = s.valid ? (s.approved_exceptions ? "warn" : "") : "bad";
@@ -388,7 +394,7 @@ export function renderInterventionHead(el, d, hasPlan) {
     <div class="iv-note">Hemtjänst · kontrollerat: ${s.rules_checked.map(esc).join(" · ")} · Inte verifierat mot kollektivavtal · <b>${fmtNum(s.interventions_unassigned)} insatser saknar tilldelning</b></div>
     <div class="iv-count"><h3>${fmtNum(s.interventions_total)} enskilda insatser</h3>
       <span class="r">${fmtNum(s.interventions_assigned)} tilldelade · ${fmtNum(s.interventions_unassigned)} utan tilldelning</span></div>
-    <p class="hint" style="margin-top:-6px">${s.visits_total} besök · ${s.recipients} brukare · ${s.employees} medarbetare</p>`;
+    <p class="hint" style="margin-top:-6px">${s.visits_total} besök · ${s.recipients} brukare · ${s.employees} medarbetare${commuteText(d.commute)}</p>`;
 }
 
 export function renderInterventionRows(el, rows, append, onVisit) {

@@ -7,6 +7,7 @@ venv/
 *.sqlite3
 *.db
 data/cache/
+**/data/cache/
 node_modules/
 .DS_Store
 data/ml_cases.jsonl
