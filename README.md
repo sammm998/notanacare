@@ -206,6 +206,16 @@ advisor gets the most similar cases with their measured outcomes (Claude in its 
 deterministic fallback votes by mean score, case-based reasoning). Simulated cases are bundled in
 `ml/data/replan_cases.jsonl` (generated with `python train_ml.py --seeds 1-28 --per-seed 6`).
 
+### Design
+
+The interface follows the Notana brand: the flower mark (`frontend/img/notana-mark.svg`, a vector
+reconstruction; replace it with the official file if you have it) and the wordmark, Instrument Sans,
+light neutrals as the base (#f8f8f6, #f1f1ee, white), brown and dark brown (#4a2e20, #251912) for
+structure, text and primary buttons, pink and blue (#f4c2fb, #a6cae8) as measured accents, and
+lavender, mint, salmon and yellow only for status. Layout as in the Notana dashboard: a sidebar with
+navigation and a status card, a breadcrumb top bar, a centred greeting with white KPI cards, and a dark
+"Notana föreslår lösningar" banner with cards for the unplanned visits. Light and dark mode.
+
 ### Documentation page
 
 `/documentation` (link in the header) explains architecture, every module, the engine, rules, wishes,

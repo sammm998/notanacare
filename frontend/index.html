@@ -1,33 +1,61 @@
 <!doctype html>
-<html lang="en">
+<html lang="sv">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Notana Care · Planning Simulator</title>
+  <title>Notana Care · Planering</title>
+  <link rel="icon" href="/static/img/notana-mark.svg" type="image/svg+xml" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&display=swap" />
   <link rel="stylesheet" href="/static/vendor/leaflet/leaflet.css" />
   <link rel="stylesheet" href="/static/css/app.css" />
   <script src="/static/vendor/leaflet/leaflet.js" defer></script>
   <script type="module" src="/static/js/app.js"></script>
 </head>
 <body>
+<div class="shell">
+  <nav class="side" aria-label="Huvudmeny">
+    <div class="side-brand"><span class="mark-tile"><svg xmlns="http://www.w3.org/2000/svg" viewBox="-50 -50 100 100" aria-hidden="true"><defs><mask id="nm-side"><rect x="-50" y="-50" width="100" height="100" fill="#fff"/><g fill="#000"><path d="M-21,-21 Q0,-2 21,-21 Q2,0 21,21 Q0,2 -21,21 Q-2,0 -21,-21Z"/><rect x="27" y="-1.3" width="4" height="2.6" rx="1.3" transform="rotate(45)"/><rect x="27" y="-1.3" width="4" height="2.6" rx="1.3" transform="rotate(135)"/><rect x="27" y="-1.3" width="4" height="2.6" rx="1.3" transform="rotate(225)"/><rect x="27" y="-1.3" width="4" height="2.6" rx="1.3" transform="rotate(315)"/></g></mask></defs><g fill="currentColor" mask="url(#nm-side)"><circle r="31"/><circle cx="-11.39" cy="-33.09" r="13.5"/><circle cx="11.39" cy="-33.09" r="13.5"/><circle cx="33.09" cy="-11.39" r="13.5"/><circle cx="33.09" cy="11.39" r="13.5"/><circle cx="11.39" cy="33.09" r="13.5"/><circle cx="-11.39" cy="33.09" r="13.5"/><circle cx="-33.09" cy="11.39" r="13.5"/><circle cx="-33.09" cy="-11.39" r="13.5"/></g></svg></span><div><strong>Notana Care</strong><small>Planering &amp; omplanering</small></div></div>
+    <div class="side-nav" id="tabs">
+      <button data-tab="iv" class="active"><svg class="ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M2 2h5v5H2zM9 2h5v5H9zM2 9h5v5H2zM9 9h5v5H9z"/></svg><span>Insatser</span></button>
+      <button data-tab="map"><svg class="ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1a5 5 0 0 0-5 5c0 3.6 5 9 5 9s5-5.4 5-9a5 5 0 0 0-5-5zm0 7a2 2 0 1 1 0-4 2 2 0 0 1 0 4z"/></svg><span>Karta</span></button>
+      <button data-tab="timeline"><svg class="ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M2 3h8v2.5H2zM5 6.8h9v2.5H5zM3 10.6h7v2.5H3z"/></svg><span>Tidslinje</span></button>
+      <button data-tab="conflicts"><svg class="ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1 15 14H1zM7.2 6v4h1.6V6zm0 5.2v1.6h1.6v-1.6z"/></svg><span>Oplanerade</span><span id="t-conf" class="count"></span></button>
+      <button data-tab="replan"><svg class="ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2a6 6 0 0 1 5.6 3.8L15 5v4h-4l1.4-1.4A4.3 4.3 0 0 0 3.8 8H2a6 6 0 0 1 6-6zm-4.6 8.4A4.3 4.3 0 0 0 12.2 8H14a6 6 0 0 1-11.6 2.2L1 11V7h4z"/></svg><span>Omplanering</span></button>
+      <button data-tab="score"><svg class="ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1 2 3.5v4C2 11 4.6 14 8 15c3.4-1 6-4 6-7.5v-4zm-1 10L4 8l1.2-1.2L7 8.6l3.8-3.8L12 6z"/></svg><span>Poäng &amp; validering</span></button>
+      <button data-tab="live"><svg class="ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M1 8h3l2-5 3 10 2-5h4v1.6h-3l-3 6.4-3-10-1.2 3H1z"/></svg><span>Live</span><span id="t-live" class="count"></span></button>
+      <button data-tab="week" id="tab-btn-week" class="hidden"><svg class="ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M2 3h12v11H2zm1.6 3.4v6h8.8v-6zM4 1h2v3H4zm6 0h2v3h-2z"/></svg><span>Vecka</span></button>
+      <button data-tab="experiments"><svg class="ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M5 1h6v1.6h-1v3.6l4 6.6A1.4 1.4 0 0 1 12.8 15H3.2A1.4 1.4 0 0 1 2 12.8l4-6.6V2.6H5z"/></svg><span>Experiment</span></button>
+      <button data-tab="ml"><svg class="ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4h8v8H4zM6 1h1.6v2H6zm2.4 0H10v2H8.4zM6 13h1.6v2H6zm2.4 0H10v2H8.4zM1 6h2v1.6H1zm0 2.4h2V10H1zm12-2.4h2v1.6h-2zm0 2.4h2V10h-2z"/></svg><span>Maskininlärning</span></button>
+    </div>
+    <div class="side-foot">
+      <a class="side-link" href="/documentation" target="_blank" rel="noopener" title="Hur systemet fungerar: arkitektur, motor, regler, AI och maskininlärning"><svg class="ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 1h7l3 3v11H3zm2 5v1.4h6V6zm0 2.8v1.4h6V8.8zm0 2.8V13h4v-1.4z"/></svg><span>Dokumentation</span></a>
+      <div class="side-card">
+        <strong>Planeringssimulator</strong>
+        <small>Hemtjänst · syntetiska data</small>
+        <span id="b-version" class="badge muted" title="Running version (git commit)">version: –</span>
+      </div>
+    </div>
+  </nav>
+
+  <div class="work">
   <header class="topbar">
-    <div class="brand"><span class="logo">N</span><div><strong>Notana Care</strong><small>Care planning &amp; re-planning simulator</small></div></div>
+    <div class="crumb"><span id="crumb-ico"><svg class="ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M2 2h5v5H2zM9 2h5v5H9zM2 9h5v5H2zM9 9h5v5H9z"/></svg></span><span id="crumb">Insatser</span></div>
     <div class="badges">
       <span id="b-scenario" class="badge muted">no scenario</span>
       <span id="b-travel" class="badge muted" title="Active travel-time source">travel: –</span>
       <span id="b-llm" class="badge muted" title="Optional planning advisor">advisor: –</span>
-      <span id="b-iv" class="badge iv hidden" title="Interventions planned / performed in the current plan"></span>
       <span id="b-valid" class="badge muted" title="Independent validator result">not validated</span>
-      <span id="b-version" class="badge muted" title="Running version (git commit)">version: –</span>
-      <a class="badge" href="/documentation" target="_blank" rel="noopener" title="How the system works: architecture, engine, rules, AI and machine learning">Documentation</a>
       <span id="b-job" class="badge job hidden"><span class="spinner"></span><span id="b-job-text">working…</span></span>
     </div>
+    <span id="b-iv" class="badge iv hidden" title="Interventions planned / performed in the current plan"></span>
   </header>
 
   <div class="layout">
     <aside class="sidebar">
       <details open class="card">
-        <summary>1 · Scenario (synthetic data)</summary>
+        <summary><span class="step">1</span> Scenario <span class="hint-inline">syntetiska data</span></summary>
         <form id="f-scenario" onsubmit="return false" class="form">
           <label>Seed <input name="seed" type="number" value="42" /></label>
           <label>Horizon <select name="days"><option value="1">One day</option><option value="7">A week, Mon–Sun (rosters, dygnsvila, veckovila)</option></select></label>
@@ -42,13 +70,13 @@
           <label>Sync tolerance (min) <input name="double_staffing_sync_tolerance" type="number" min="0" max="15" value="0" /></label>
           <label class="check"><input name="breaks_enabled" type="checkbox" checked /> Meal breaks</label>
           <label class="check" title="Gender wishes, languages, pets / allergies, smoking, bike or car, preferred area"><input name="preferences_enabled" type="checkbox" checked /> Wishes &amp; person attributes</label>
-          <label class="check" id="lbl-google" title="Restider med live-trafik från Google Routes. Kostar API-anrop, men bara för adresser som inte redan finns i cachen. Avstängt: inga nya anrop (redan hämtade Google-restider återanvänds gratis, annars uppskattning)."><input type="checkbox" id="chk-google" /> Google-restider med live-trafik <span class="hint">(kostar API-anrop)</span></label>
+          <label class="check google-opt" id="lbl-google" title="Restider med live-trafik från Google Routes. Kostar API-anrop, men bara för adresser som inte redan finns i cachen. Avstängt: inga nya anrop (redan hämtade Google-restider återanvänds gratis, annars uppskattning)."><input type="checkbox" id="chk-google" /><span>Google-restider med live-trafik <span class="hint">kostar API-anrop</span></span></label>
           <button type="submit" class="primary">Generate scenario</button>
         </form>
       </details>
 
       <details open class="card">
-        <summary>2 · Optimise the day</summary>
+        <summary><span class="step">2</span> Optimera dagen</summary>
         <form id="f-plan" onsubmit="return false" class="form">
           <label>Strategy <select name="strategy" id="sel-strategy"></select></label>
           <label>Time limit (s) <input name="time_limit_s" type="number" value="25" min="2" max="300" /></label>
@@ -60,7 +88,7 @@
       </details>
 
       <details open class="card">
-        <summary>3 · Real-time incidents</summary>
+        <summary><span class="step">3</span> Händelser i realtid</summary>
         <form id="f-incident" onsubmit="return false" class="form">
           <label>Clock <input name="clock" type="time" value="10:14" step="60" /></label>
           <label>Incident <select name="kind" id="sel-incident">
@@ -87,19 +115,7 @@
         <div class="seg" id="week-days"></div>
         <button id="btn-plan-week" class="primary" disabled title="Optimise Monday to Sunday in order, with the time limit and weights from step 2">Optimise whole week</button>
       </div>
-      <section id="kpis" class="kpis"><div class="empty">Generate a scenario to begin. All people and addresses are synthetic.</div></section>
-      <nav class="tabs" id="tabs">
-        <button data-tab="iv" class="active">Insatser</button>
-        <button data-tab="map">Map</button>
-        <button data-tab="timeline">Timeline</button>
-        <button data-tab="conflicts">Unplanned / conflicts <span id="t-conf" class="count"></span></button>
-        <button data-tab="replan">Re-planning</button>
-        <button data-tab="score">Score &amp; validation</button>
-        <button data-tab="live">Live <span id="t-live" class="count"></span></button>
-        <button data-tab="week" id="tab-btn-week" class="hidden">Week</button>
-        <button data-tab="experiments">Experiments</button>
-        <button data-tab="ml">Machine learning</button>
-      </nav>
+      <section id="kpis" class="kpis hidden"><div class="empty">Generate a scenario to begin. All people and addresses are synthetic.</div></section>
       <section class="tab" id="tab-iv">
         <div id="iv-head"><div class="empty">Generera ett scenario för att se insatserna.</div></div>
         <div class="iv-tools">
@@ -186,6 +202,8 @@
       </section>
     </main>
   </div>
+  </div>
+</div>
 
   <aside id="drawer" class="drawer hidden"><button class="close" id="drawer-close" aria-label="Close">×</button><div id="drawer-body"></div></aside>
   <div id="toast" class="toast hidden"></div>

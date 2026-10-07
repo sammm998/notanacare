@@ -7,37 +7,37 @@
 <meta name="description" content="Hur systemet fungerar: arkitektur, planeringsmotor, regler, önskemål, Arbetstidslagen, vecka, förslag, live-dag, AI och maskininlärning." />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,500;6..72,600&family=Instrument+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" />
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" />
 <style>
 body { margin: 0; }
 
 /* Layout: two-column reference doc. A sticky table of contents on the left, one reading column on the right; one column on phones. */
 :root {
-  --bg: #f6f8f8;
+  --bg: #f8f8f6;
   --surface: #ffffff;
-  --fg: #17242a;
-  --muted: #5a6b72;
-  --line: #d9e2e4;
-  --accent: #0f7466;
-  --accent-soft: #e2f1ee;
-  --warn: #9a5b00;
-  --warn-soft: #fbf0dc;
-  --bad: #a3322b;
-  --code-bg: #eef3f3;
-  --f-display: "Newsreader", "Iowan Old Style", Georgia, serif;
+  --fg: #251912;
+  --muted: #6a6560;
+  --line: #e3e1dc;
+  --accent: #4a2e20;
+  --accent-soft: #f6e6fa;
+  --warn: #7d5a0c;
+  --warn-soft: #fdf3c8;
+  --bad: #b83a33;
+  --code-bg: #f1f1ee;
+  --f-display: "Instrument Sans", "Segoe UI", system-ui, sans-serif;
   --f-body: "Instrument Sans", "Segoe UI", system-ui, -apple-system, sans-serif;
   --f-mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --bg: #0f1719; --surface: #152023; --fg: #e3ecee; --muted: #93a6ac; --line: #26363a;
-    --accent: #4cc3ae; --accent-soft: #163a35; --warn: #e2a94a; --warn-soft: #3a2c14; --bad: #ef7b72; --code-bg: #1a282b;
+    --bg: #120c09; --surface: #1a120e; --fg: #f5f2ee; --muted: #b3aaa2; --line: #3a2c24;
+    --accent: #f4c2fb; --accent-soft: #3a2433; --warn: #f3d77a; --warn-soft: #3d3214; --bad: #ff9c94; --code-bg: #241914;
     color-scheme: dark;
   }
 }
 :root[data-theme="dark"] {
-  --bg: #0f1719; --surface: #152023; --fg: #e3ecee; --muted: #93a6ac; --line: #26363a;
-  --accent: #4cc3ae; --accent-soft: #163a35; --warn: #e2a94a; --warn-soft: #3a2c14; --bad: #ef7b72; --code-bg: #1a282b;
+  --bg: #120c09; --surface: #1a120e; --fg: #f5f2ee; --muted: #b3aaa2; --line: #3a2c24;
+  --accent: #f4c2fb; --accent-soft: #3a2433; --warn: #f3d77a; --warn-soft: #3d3214; --bad: #ff9c94; --code-bg: #241914;
   color-scheme: dark;
 }
 * { box-sizing: border-box; }
@@ -53,7 +53,9 @@ nav.toc a:hover, nav.toc a:focus-visible { color: var(--accent); }
 main { min-width: 0; max-width: 760px; }
 header.doc { border-bottom: 1px solid var(--line); padding-bottom: 28px; margin-bottom: 8px; }
 .eyebrow { font-size: 12px; text-transform: uppercase; letter-spacing: .1em; color: var(--accent); font-weight: 600; margin: 0 0 8px; }
-h1, h2, h3 { font-family: var(--f-display); font-weight: 600; text-wrap: balance; line-height: 1.2; }
+.doc-logo { display: flex; align-items: center; gap: 10px; color: var(--fg); font-weight: 600; font-size: 22px; letter-spacing: -0.03em; margin-bottom: 18px; }
+.doc-logo svg { width: 30px; height: 30px; }
+h1, h2, h3 { font-family: var(--f-display); font-weight: 500; letter-spacing: -0.02em; text-wrap: balance; line-height: 1.2; }
 h1 { font-size: clamp(32px, 5vw, 44px); margin: 0 0 14px; }
 h2 { font-size: 28px; margin: 56px 0 14px; scroll-margin-top: 24px; }
 h3 { font-size: 20px; margin: 30px 0 8px; }
@@ -147,6 +149,7 @@ footer { margin-top: 64px; padding-top: 18px; border-top: 1px solid var(--line);
 
   <main>
     <header class="doc">
+      <div class="doc-logo"><svg xmlns="http://www.w3.org/2000/svg" viewBox="-50 -50 100 100" aria-hidden="true"><defs><mask id="nm-doc"><rect x="-50" y="-50" width="100" height="100" fill="#fff"/><g fill="#000"><path d="M-21,-21 Q0,-2 21,-21 Q2,0 21,21 Q0,2 -21,21 Q-2,0 -21,-21Z"/><rect x="27" y="-1.3" width="4" height="2.6" rx="1.3" transform="rotate(45)"/><rect x="27" y="-1.3" width="4" height="2.6" rx="1.3" transform="rotate(135)"/><rect x="27" y="-1.3" width="4" height="2.6" rx="1.3" transform="rotate(225)"/><rect x="27" y="-1.3" width="4" height="2.6" rx="1.3" transform="rotate(315)"/></g></mask></defs><g fill="currentColor" mask="url(#nm-doc)"><circle r="31"/><circle cx="-11.39" cy="-33.09" r="13.5"/><circle cx="11.39" cy="-33.09" r="13.5"/><circle cx="33.09" cy="-11.39" r="13.5"/><circle cx="33.09" cy="11.39" r="13.5"/><circle cx="11.39" cy="33.09" r="13.5"/><circle cx="-11.39" cy="33.09" r="13.5"/><circle cx="-33.09" cy="11.39" r="13.5"/><circle cx="-33.09" cy="-11.39" r="13.5"/></g></svg><span>Notana</span></div>
       <p class="eyebrow">Systemdokumentation · prototyp</p>
       <h1>Notana Care Planeringsmotor</h1>
       <p class="lead">Så planerar och omplanerar systemet en dag eller en vecka i hemtjänsten: från tusentals strukturerade insatser till körbara rutter för varje medarbetare, med Arbetstidslagen, kompetenser, delegeringar, personalens förutsättningar, brukarens önskemål, händelser i realtid och en modell som lär sig av simulerade fall.</p>

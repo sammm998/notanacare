@@ -6,7 +6,7 @@ import { esc, hhmm } from "./util.js";
  * OpenStreetMap as fallback. The rendering code below only uses this API.
  * ---------------------------------------------------------------------- */
 
-const PALETTE = ["#1f6fd1", "#d1495b", "#2a9d5b", "#9b51e0", "#e08a00", "#00a3a3", "#c2185b", "#5d6d7e", "#7cb342", "#8d6e63", "#3949ab", "#ef6c00"];
+const PALETTE = ["#4a2e20", "#6f9ccb", "#c58bd0", "#2e8b74", "#e85a54", "#b0835f", "#8b6fd0", "#c99400", "#3f6c8f", "#a24f6e", "#6a6560", "#4e9c5f"];
 export const colorFor = (i) => PALETTE[i % PALETTE.length];
 
 class LeafletAdapter {
@@ -98,7 +98,7 @@ class GoogleAdapter {
   badge(p, o) {
     const size = o.size || 24;
     const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}"><circle cx="${size / 2}" cy="${size / 2}" r="${size / 2 - 2}" fill="${o.fill || "#fff"}" stroke="${o.color}" stroke-width="3"/>` +
-      `<text x="50%" y="54%" dominant-baseline="middle" text-anchor="middle" font-family="system-ui,Arial" font-weight="700" font-size="${o.text.length > 2 ? 9 : 11}" fill="${o.textColor || "#1d2733"}">${esc(o.text)}</text></svg>`;
+      `<text x="50%" y="54%" dominant-baseline="middle" text-anchor="middle" font-family="system-ui,Arial" font-weight="700" font-size="${o.text.length > 2 ? 9 : 11}" fill="${o.textColor || "#251912"}">${esc(o.text)}</text></svg>`;
     const m = new google.maps.Marker({
       position: { lat: p[0], lng: p[1] }, map: this.map, zIndex: o.z || 500,
       icon: { url: "data:image/svg+xml;charset=UTF-8," + encodeURIComponent(svg), anchor: new google.maps.Point(size / 2, size / 2) },
@@ -109,7 +109,7 @@ class GoogleAdapter {
 
 function badgeHtml(o) {
   const s = o.size || 24;
-  return `<div style="width:${s}px;height:${s}px;border-radius:50%;background:${o.fill || "#fff"};border:3px solid ${o.color};box-sizing:border-box;display:grid;place-items:center;font:700 ${o.text.length > 2 ? 9 : 11}px system-ui;color:${o.textColor || "#1d2733"};box-shadow:0 1px 3px rgba(0,0,0,.35)">${esc(o.text)}</div>`;
+  return `<div style="width:${s}px;height:${s}px;border-radius:50%;background:${o.fill || "#fff"};border:3px solid ${o.color};box-sizing:border-box;display:grid;place-items:center;font:700 ${o.text.length > 2 ? 9 : 11}px system-ui;color:${o.textColor || "#251912"};box-shadow:0 1px 3px rgba(0,0,0,.35)">${esc(o.text)}</div>`;
 }
 
 function arrowSegments(path) {
@@ -237,7 +237,7 @@ function drawRecipients(state, muted, highlight) {
 function drawOffices(state) {
   for (const b of state.scenario.bases) {
     const l = state.scenario.locations[b];
-    adapter.badge([l.lat, l.lon], { text: "⌂", color: "#1d2733", fill: "#1d2733", textColor: "#fff", size: 20, z: 300, tip: esc(l.label) });
+    adapter.badge([l.lat, l.lon], { text: "⌂", color: "#251912", fill: "#251912", textColor: "#fff", size: 20, z: 300, tip: esc(l.label) });
   }
 }
 
@@ -279,7 +279,7 @@ export async function renderMap(state, opts) {
 
   if (mode === "employee" && opts.employee && plan?.routes[opts.employee]) {
     const eid = opts.employee;
-    const color = "#1f6fd1";
+    const color = "#4a2e20";
     const items = routeItems(state, eid);
     const visitRecipients = new Set(items.filter((i) => i.kind === "visit").map((i) => state.visitsById[i.visit_id]?.recipient_id));
     drawRecipients(state, true, visitRecipients);
@@ -303,7 +303,7 @@ export async function renderMap(state, opts) {
       if (it.kind === "visit") {
         const v = state.visitsById[it.visit_id] || {};
         adapter.badge(p, {
-          text: String(it.n), color: changed.has(it.visit_id) ? "#e07a1f" : v.staff === 2 ? "#7b5bc9" : color,
+          text: String(it.n), color: changed.has(it.visit_id) ? "#e85a54" : v.staff === 2 ? "#8b6fd0" : color,
           fill: it.visit_id === opts.selectedVisit ? "#ffe9a8" : "#fff", size: 26, z: 900,
           tip: `<b>${it.n}. ${hhmm(it.start)}–${hhmm(it.end)}</b> ${esc(it.visit_id)}<br>${esc(v.recipient_id || "")} · ${it.end - it.start} min${v.staff === 2 ? " · double-staffed" : ""}<br>travel in: ${it.travel_from_prev} min`,
           onClick: () => handlers.onVisit(it.visit_id),
@@ -315,11 +315,11 @@ export async function renderMap(state, opts) {
       // Home and commute to the team office (own time, not part of the route).
       const office = sc.locations[emp.start_location_id];
       if (office) adapter.line([[emp.home_lat, emp.home_lon], [office.lat, office.lon]], { color: "#7a8594", weight: 2, opacity: 0.8, dashed: true });
-      adapter.badge([emp.home_lat, emp.home_lon], { text: "⌂", color: "#1d2733", fill: "#ffffff", size: 22, z: 430,
+      adapter.badge([emp.home_lat, emp.home_lon], { text: "⌂", color: "#251912", fill: "#ffffff", size: 22, z: 430,
         tip: `<b>Hem</b> ${esc(emp.home_address)}<br>${emp.commute_minutes ?? "?"} min till kontoret ${emp.commute_mode === "car" ? "med bil" : "med kollektivtrafik"}` });
     }
-    adapter.badge(pts[0], { text: "S", color: "#1d2733", fill: "#2a9d5b", textColor: "#fff", size: 22, z: 450, tip: "Start of the day" });
-    adapter.badge(pts[pts.length - 1], { text: "E", color: "#1d2733", fill: "#d1495b", textColor: "#fff", size: 18, z: 440, tip: "End of the day" });
+    adapter.badge(pts[0], { text: "S", color: "#251912", fill: "#a9e6dc", textColor: "#251912", size: 22, z: 450, tip: "Start of the day" });
+    adapter.badge(pts[pts.length - 1], { text: "E", color: "#251912", fill: "#f4c2fb", textColor: "#251912", size: 18, z: 440, tip: "End of the day" });
     if (opts.fit !== false) adapter.fit(pts);
     return;
   }

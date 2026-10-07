@@ -1,7 +1,7 @@
 import { api, runJob } from "./api.js";
 import { changedVisits, renderGantt } from "./gantt.js";
 import { initMap, invalidate, renderItinerary, renderMap, renderTeamLegend } from "./map.js";
-import { renderConflicts, renderExperiment, renderHistory, renderInterventionHead, renderInterventionRows, renderKpis, renderLiveFeed, renderML, renderReplan, renderScore, renderVisit, renderWeek } from "./panels.js";
+import { renderConflicts, renderExperiment, renderHistory, renderInterventionHead, renderSuggestBanner, renderInterventionRows, renderKpis, renderLiveFeed, renderML, renderReplan, renderScore, renderVisit, renderWeek } from "./panels.js";
 import { $, $$, esc, fmtNum, hhmm, parseHHMM, toast } from "./util.js";
 
 const state = {
@@ -119,6 +119,15 @@ async function loadInterventions(more) {
     }
     d.commute = state.scenario?.commute;
     renderInterventionHead($("#iv-head"), d, !!state.plan);
+    if (state.plan) {
+      const un = Object.values(state.plan.unplanned).map((u) => {
+        const v = state.visitsById[u.visit_id] || {};
+        const r = state.scenario.recipients.find((x) => x.id === v.recipient_id);
+        return { visit_id: u.visit_id, name: r?.name || v.recipient_id || u.visit_id, priority: v.priority || 0, earliest: v.earliest ?? 0,
+          window: v.earliest != null ? `${hhmm(v.earliest)}–${hhmm(v.latest)}` : "", reason: u.reasons?.[0]?.message || "kunde inte planeras" };
+      }).sort((a, b) => b.priority - a.priority || a.earliest - b.earliest);
+      renderSuggestBanner($("#iv-suggest"), un.slice(0, 4), un.length, openVisit, () => switchTab("conflicts"));
+    }
     renderInterventionRows($("#iv-table"), d.rows, more, openVisit);
     state.iv = { offset: offset + d.rows.length, key };
     const left = d.total - state.iv.offset;
@@ -576,6 +585,12 @@ async function loadVisitRecommendation(vid) {
 function switchTab(tab) {
   state.tab = tab;
   $$("#tabs button").forEach((b) => b.classList.toggle("active", b.dataset.tab === tab));
+  $("#kpis").classList.toggle("hidden", tab === "iv"); // the Insatser page has its own summary cards
+  const navBtn = $(`#tabs button[data-tab="${tab}"]`);
+  if (navBtn) {
+    $("#crumb").textContent = navBtn.querySelector("span")?.textContent || "";
+    $("#crumb-ico").innerHTML = navBtn.querySelector("svg")?.outerHTML || "";
+  }
   $$(".tab").forEach((s) => s.classList.toggle("hidden", s.id !== `tab-${tab}`));
   if (tab === "map") {
     ensureMap().then(() => { invalidate(); render(); });

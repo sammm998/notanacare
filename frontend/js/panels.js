@@ -366,35 +366,63 @@ function commuteText(c) {
   return ` · Resa hemifrån till kontoret: median ${c.median_minutes} min, 90 % ≤ ${c.p90_minutes} min${c.over_45 ? `, ${c.over_45} över 45 min` : ""} (${src})`;
 }
 
+function greeting() {
+  const h = new Date().getHours();
+  return h < 10 ? "God morgon." : h < 18 ? "God dag." : "God kväll.";
+}
+
 export function renderInterventionHead(el, d, hasPlan) {
   const s = d.summary;
   const pctTxt = (a, b) => (b ? `${Math.round(1000 * a / b) / 10} %` : "–");
   if (!hasPlan) {
-    el.innerHTML = `<div class="iv-hero"><div><div class="eyebrow">Simulerad dag · ej optimerad</div><h2>Dagens insatser</h2>
-      <div class="sub">${esc(s.area)} · Hemtjänst · seed ${s.seed}</div></div></div>
-      <div class="iv-count"><h3>${fmtNum(s.interventions_total)} enskilda insatser</h3><span class="r">Optimera dagen för att tilldela dem</span></div>
-      <p class="hint">${s.visits_total} besök · ${s.recipients} brukare · ${s.employees} medarbetare${commuteText(d.commute)}</p>`;
+    el.innerHTML = `<div class="iv-hero"><div class="eyebrow">Simulerad dag · ej optimerad</div><h2>${greeting()}</h2>
+      <div class="sub">${fmtNum(s.interventions_total)} insatser i ${esc(s.area)} väntar på att planeras. Optimera dagen för att tilldela dem till personalen.</div></div>
+      <div class="iv-cards">
+        <div class="iv-card"><div class="k">Insatser</div><div class="n">${fmtNum(s.interventions_total)}</div><div class="s">enskilda insatser i dag</div></div>
+        <div class="iv-card"><div class="k">Besök</div><div class="n">${fmtNum(s.visits_total)}</div><div class="s">insatser grupperade per brukare</div></div>
+        <div class="iv-card"><div class="k">Brukare</div><div class="n">${fmtNum(s.recipients)}</div><div class="s">med beviljade insatser</div></div>
+        <div class="iv-card"><div class="k">Medarbetare</div><div class="n">${fmtNum(s.employees)}</div><div class="s">i tjänst${d.commute ? ` · resa till jobbet ${d.commute.median_minutes} min (median)` : ""}</div></div>
+      </div>
+      <div class="iv-count"><h3>${fmtNum(s.interventions_total)} enskilda insatser</h3><span class="r">Optimera dagen för att tilldela dem</span></div>`;
     return;
   }
   const cls = s.valid ? (s.approved_exceptions ? "warn" : "") : "bad";
   el.innerHTML = `
-    <div class="iv-hero"><div><div class="eyebrow">Optimerad dag</div><h2>Dagens omsorgsplan</h2>
-      <div class="sub">${esc(s.area)} · Hemtjänst · ${esc(s.weekday)} · seed ${s.seed}</div></div>
-      <div class="iv-status ${cls}" title="Oberoende validator">${s.valid ? (s.approved_exceptions ? "VALID*" : "VALID") : "INVALID"}</div></div>
+    <div class="iv-hero"><div class="eyebrow">Dagens omsorgsplan · ${esc(s.area)} · ${esc(s.weekday)} · seed ${s.seed}
+      <span class="iv-status ${cls}" title="Oberoende validator">${s.valid ? (s.approved_exceptions ? "Giltig med godkända avsteg" : "Giltig plan") : "Ogiltig plan"}</span></div>
+      <h2>${greeting()}</h2>
+      <div class="sub">Samlad bild av dagens insatser och besök. Planen räknas fram av optimeringen och kontrolleras av en oberoende validator${s.clock ? `, klockan är ${esc(s.clock)}` : ""}.</div></div>
     <div class="iv-cards">
       <div class="iv-card"><div class="k">Planerade insatser</div><div class="n">${fmtNum(s.interventions_assigned)}</div>
-        <div class="s">av ${fmtNum(s.interventions_total)} insatser (${pctTxt(s.interventions_assigned, s.interventions_total)}) · ${s.visits_planned}/${s.visits_total} besök${s.clock ? `<br><b>${fmtNum(s.interventions_done)} utförda kl. ${esc(s.clock)}</b>${s.interventions_ongoing ? ` · ${fmtNum(s.interventions_ongoing)} pågår` : ""}` : ""}</div></div>
+        <div class="s">av ${fmtNum(s.interventions_total)} (${pctTxt(s.interventions_assigned, s.interventions_total)}) · ${s.visits_planned}/${s.visits_total} besök${s.clock ? `<br><b>${fmtNum(s.interventions_done)} utförda</b>${s.interventions_ongoing ? ` · ${fmtNum(s.interventions_ongoing)} pågår` : ""}` : ""}</div></div>
       <div class="iv-card"><div class="k">Oplanerade besök</div><div class="n ${s.visits_unplanned ? "bad" : ""}">${s.visits_unplanned}</div>
-        <div class="s">Prioritetsvikt ${s.unplanned_priority_weight} · ${s.unplanned_high_priority} med prio 5</div></div>
-      <div class="iv-card"><div class="k">Personal med godkänt schema</div><div class="n">${s.staff_compliant}/${s.staff_working}</div>
-        <div class="s">Arbetstidslagen, kompetens, önskemål – oberoende validator</div></div>
+        <div class="s">${s.unplanned_high_priority} med prio 5 · prioritetsvikt ${s.unplanned_priority_weight}</div></div>
+      <div class="iv-card"><div class="k">Godkänt schema</div><div class="n">${s.staff_compliant}/${s.staff_working}</div>
+        <div class="s">Arbetstidslagen, kompetens och önskemål</div></div>
       <div class="iv-card"><div class="k">Kontinuitet</div><div class="n">${s.continuity != null ? Math.round(100 * s.continuity) + " %" : "–"}</div>
-        <div class="s">känd personal · ${s.runtime_s ?? "–"} s · ${s.iterations ?? "–"} iterationer</div></div>
+        <div class="s">känd personal · ${s.runtime_s ?? "–"} s · ${fmtNum(s.iterations ?? 0)} iterationer</div></div>
     </div>
-    <div class="iv-note">Hemtjänst · kontrollerat: ${s.rules_checked.map(esc).join(" · ")} · Inte verifierat mot kollektivavtal · <b>${fmtNum(s.interventions_unassigned)} insatser saknar tilldelning</b></div>
+    <div id="iv-suggest"></div>
+    <div class="iv-note">Kontrollerat: ${s.rules_checked.map(esc).join(" · ")} · Inte verifierat mot kollektivavtal${commuteText(d.commute)}</div>
     <div class="iv-count"><h3>${fmtNum(s.interventions_total)} enskilda insatser</h3>
-      <span class="r">${fmtNum(s.interventions_assigned)} tilldelade · ${fmtNum(s.interventions_unassigned)} utan tilldelning</span></div>
-    <p class="hint" style="margin-top:-6px">${s.visits_total} besök · ${s.recipients} brukare · ${s.employees} medarbetare${commuteText(d.commute)}</p>`;
+      <span class="r">${fmtNum(s.interventions_assigned)} tilldelade · ${fmtNum(s.interventions_unassigned)} utan tilldelning · ${s.visits_total} besök · ${s.recipients} brukare · ${s.employees} medarbetare</span></div>`;
+}
+
+const PERSON_ICO = '<svg class="ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 1h10v14H3zm5 3a2 2 0 1 0 0 4 2 2 0 0 0 0-4zm-3.2 8h6.4c0-1.8-1.4-3-3.2-3s-3.2 1.2-3.2 3z"/></svg>';
+
+/** "Notana föreslår lösningar": the unplanned visits that need a decision, most important first. */
+export function renderSuggestBanner(el, items, total, onVisit, onAll) {
+  if (!el) return;
+  if (!total) { el.innerHTML = ""; return; }
+  el.innerHTML = `<div class="suggest">
+    <div class="suggest-head"><b>Notana föreslår lösningar</b><span>${total} besök kunde inte planeras. Öppna ett besök för en rekommenderad lösning som du kan acceptera.</span><span class="bubble">${total}</span></div>
+    <div class="suggest-grid">${items.map((x) => `<button class="suggest-card" data-visit="${esc(x.visit_id)}">
+      <span class="who">${PERSON_ICO}${esc(x.name)}<span class="plus">+</span></span>
+      <span class="what">${esc(x.visit_id)} · ${esc(x.window)}${x.priority >= 5 ? " · prio 5" : ""} · ${esc(x.reason)}</span></button>`).join("")}</div>
+    ${total > items.length ? `<p class="hint" style="margin-top:8px"><button id="btn-suggest-all">Visa alla ${total} oplanerade</button></p>` : ""}
+  </div>`;
+  el.querySelectorAll("[data-visit]").forEach((b) => b.addEventListener("click", () => onVisit(b.dataset.visit)));
+  el.querySelector("#btn-suggest-all")?.addEventListener("click", onAll);
 }
 
 export function renderInterventionRows(el, rows, append, onVisit) {
