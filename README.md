@@ -35,7 +35,8 @@ python -m uvicorn notana_planner.api:app --port 8000    # open http://localhost:
    The header badge reads e.g. *Insatser: 4 812 av 5 004 planerade · 31 oplanerade · 1 903 utförda kl. 12:10*.
    Explore the **Map**, **Timeline** (Gantt), **Unplanned / conflicts** (each with a reason) and **Score & validation**.
    Opening an unplanned visit shows a **recommended solution** with **Acceptera** (plus the other options).
-   With *Run 3 real-time incidents automatically* (on by default) three live events start after the first optimisation.
+   Live incidents run only when you start them (*Start live day* in the Live tab); tick *Run 3 real-time
+   incidents automatically* (off by default) to start three events after the first optimisation.
 4. Set the **clock** (e.g. 10:14), apply an **incident** and read the **Re-planning report** (before/after, phases used, every changed visit).
 5. **Experiments** tab: run strategies A–D on the same scenario and incidents.
 6. Week scenarios: pick a day in the **Week** bar, or **Optimise whole week**; the **Week** tab shows
